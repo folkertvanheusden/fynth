@@ -480,7 +480,7 @@ void on_process(void *userdata)
 
 					cur -> offset[ch_i] += cur -> s -> repeat_start[ch_i];
 				}
-				else if (cur -> offset[ch_i] >= cur -> s -> n_samples[ch_i]) {
+				else if (cur -> offset[ch_i] >= cur -> s -> n_samples[ch_i] || (cur -> offset[ch_i] >= cur -> end_offset[ch_i] && cur -> end_offset[ch_i] >= 0)) {
 					cur -> playing[ch_i] = !(cur -> offset[ch_i] >= cur -> end_offset[ch_i] && cur -> end_offset[ch_i] != -1);
 
 					cur -> offset[ch_i] = fmod(cur -> offset[ch_i], cur -> s -> n_samples[ch_i]);
@@ -576,7 +576,7 @@ bool isBigEndian()
 	return !!p[0];
 }
 
-audio_dev_t * start_pw_thread(const std::string & dev, std::vector<chosen_sample_t *> *const pn, const int sr, const clip_method_t cm, const int bits)
+audio_dev_t * start_pw_thread(std::vector<chosen_sample_t *> *const pn, const int sr, const clip_method_t cm, const int bits)
 {
 	int err;
 	audio_dev_t *const ad = new audio_dev_t;
@@ -592,8 +592,6 @@ audio_dev_t * start_pw_thread(const std::string & dev, std::vector<chosen_sample
 
 	for(int i=0; i<16; i++)
 		ad -> pitch_bends[i] = 1.0;
-
-	printf("Opening %s\n", dev.c_str());
 
 	printf("sample rate: %u\n", ad -> sample_rate);
 
@@ -663,9 +661,6 @@ void close_audio_devices(std::vector<audio_dev_t *> *devices)
 chosen_sample_t *select_sample(const std::map<uint16_t, sample_set_t *> & sets, const uint8_t ch, const uint8_t midi_note, const uint8_t velocity, const uint8_t instrument, const uint8_t bank, const int system_sample_rate)
 {
 	const bool isPercussion = ch == 9;
-
-dolog("%d %d | %d %d\n", instrument, bank, isPercussion, midi_note);
-dolog("search %04x or %04x\n", (128 << 8) | midi_note, (bank << 8) | instrument);
 
 	std::map<uint16_t, sample_set_t *>::const_iterator it = isPercussion ? sets.find((128 << 8) | midi_note) : sets.find((bank << 8) | instrument);
 
@@ -749,8 +744,6 @@ dolog("search %04x or %04x\n", (128 << 8) | midi_note, (bank << 8) | instrument)
 					sel = i;
 				}
 			}
-if (sel == -1)
-dolog("FAIL no freq match\n");
 		}
 
 		if (sel != -1) {
@@ -920,7 +913,6 @@ void help()
 	printf("-f file.sf2     sound font file\n");
 	printf("-F file.wav     sound file\n");
 	printf("\n");
-	printf("-a dev          alsa name for audio device (e.g. \"hw:0,0\" or \"pulse\")\n");
 	printf("-r wav-file     record to \"wav-file\"\n");
 	printf("-R rate         sample rate (default: %d)\n", SAMPLE_RATE);
 	printf("\n");
@@ -932,17 +924,16 @@ int main(int argc, char *argv[])
 {
 	printf("fynth v" VERSION ", (C) 2016-2021 by folkert@vanheusden.com\n\n");
 
-	std::string audio_dev = "default";
 	std::string rec_file;
 	int sr = SAMPLE_RATE, bits = 16;
 	bool isPercussion = false;
 
 	std::map<uint16_t, sample_set_t *> sets;
 
-	int c = -1;
-	while((c = getopt(argc, argv, "F:PR:r:Nl:f:m:a:h")) != -1)
+	int sw = -1;
+	while((sw = getopt(argc, argv, "F:PR:r:Nl:f:m:h")) != -1)
 	{
-		switch(c)
+		switch(sw)
 		{
 			case 'F': {
 					sample_t *s = load_wav(optarg, true/*FIXME*/);
@@ -975,10 +966,6 @@ int main(int argc, char *argv[])
 				isPercussion = false;
 				break;
 
-			case 'a':
-				audio_dev = optarg;
-				break;
-
 			case 'h':
 				help();
 				return 0;
@@ -1004,8 +991,7 @@ int main(int argc, char *argv[])
 
 	std::vector<chosen_sample_t *> playing_notes;
 
-	dolog("Using audio device %s\n", audio_dev.c_str());
-	audio_dev_t *adev = start_pw_thread(audio_dev, &playing_notes, sr, CM_DIV, bits); // FIXME CM_... not hardcoded
+	audio_dev_t *adev = start_pw_thread(&playing_notes, sr, CM_DIV, bits); // FIXME CM_... not hardcoded
 
 	std::thread t([adev]() { pw_main_loop_run(adev -> loop); });
 
@@ -1075,7 +1061,7 @@ int main(int argc, char *argv[])
 				adev -> lock.lock();
 				ssize_t pi = find_playing_note(playing_notes, ch, note);
 
-				bool isEnd = c == 0x80;
+				bool isEnd = ev->type == SND_SEQ_EVENT_NOTEOFF;
 
 				chosen_sample_t *cs = NULL;
 				if (pi == -1) {
@@ -1099,15 +1085,16 @@ int main(int argc, char *argv[])
 						cs -> playing[1] = cs -> s -> stereo;
 					}
 
-					if (c != 0x80)
-						cs -> velocity = velocity;
+					cs -> velocity = velocity;
 
 					dolog("ch: %d, note: %d, velocity: %d, end: %zd\n", ch, cs -> midi_note, cs -> velocity, isEnd);
 				}
 
+				if (isEnd)
+					printf("END OF NOTE\n");
+
 				// never repeat percussion (ch == 9)
-				ssize_t end = -1;
-				if (isEnd) {
+				if (ch == 9 || isEnd) {
 					size_t sel_end0 = cs -> offset[0] + (cs -> s -> n_samples[0] - cs -> offset[0]) * velocity / 127.0;
 					size_t sel_end1 = cs -> offset[1] + (cs -> s -> n_samples[1] - cs -> offset[1]) * velocity / 127.0;
 
@@ -1116,6 +1103,8 @@ int main(int argc, char *argv[])
 						cs -> end_offset[1] = find_sample_end(cs, sel_end1, 1);
 					else
 						cs -> end_offset[1] = -1;
+
+					printf("%f %zd / %zu\n", cs->offset[0], cs->end_offset[0], cs->s->n_samples[0]);
 				}
 
 				adev -> lock.unlock();
