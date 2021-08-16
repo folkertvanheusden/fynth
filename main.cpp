@@ -466,24 +466,25 @@ void on_process(void *userdata)
 					c2 = c1;
 			}
 
-			int n_playing = 0, n_sample_channels = cur -> s -> stereo ? 2 : 1;
+			int n_playing = 0, n_sample_channels = cur->s->stereo ? 2 : 1;
 			for(int ch_i=0; ch_i<n_sample_channels; ch_i++) {
-				if (!cur -> playing[ch_i])
+				if (!cur->playing[ch_i])
 					continue;
 
-				cur -> offset[ch_i] += cur -> speed * ad -> pitch_bends[cur -> ch];
+				cur->offset[ch_i] += cur->speed * ad->pitch_bends[cur->ch];
 
-				if (cur -> offset[ch_i] >= cur -> s -> repeat_end[ch_i] && cur -> s -> repeat_end[ch_i] > 0 && cur -> end_offset[ch_i] == -1) {
-					cur -> offset[ch_i] -= cur -> s -> repeat_start[ch_i];
-
-					cur -> offset[ch_i] = fmod(cur -> offset[ch_i], cur -> s -> repeat_end[ch_i] - cur -> s -> repeat_start[ch_i]);
-
-					cur -> offset[ch_i] += cur -> s -> repeat_start[ch_i];
+				if (cur->offset[ch_i] >= cur->end_offset[ch_i] && cur->end_offset[ch_i] >= 0) {
+					cur->playing[ch_i] = false;
 				}
-				else if (cur -> offset[ch_i] >= cur -> s -> n_samples[ch_i] || (cur -> offset[ch_i] >= cur -> end_offset[ch_i] && cur -> end_offset[ch_i] >= 0)) {
-					cur -> playing[ch_i] = !(cur -> offset[ch_i] >= cur -> end_offset[ch_i] && cur -> end_offset[ch_i] != -1);
+				else if (cur->offset[ch_i] >= cur->s->repeat_end[ch_i] && cur->s->repeat_end[ch_i] > 0 && cur->end_offset[ch_i] == -1) {
+					cur->offset[ch_i] -= cur->s->repeat_start[ch_i];
 
-					cur -> offset[ch_i] = fmod(cur -> offset[ch_i], cur -> s -> n_samples[ch_i]);
+					cur->offset[ch_i] = fmod(cur->offset[ch_i], cur->s->repeat_end[ch_i] - cur->s->repeat_start[ch_i]);
+
+					cur->offset[ch_i] += cur->s->repeat_start[ch_i];
+				}
+				else if (cur->offset[ch_i] >= cur->s->n_samples[ch_i]) {
+					cur->offset[ch_i] = fmod(cur->offset[ch_i], cur->s->n_samples[ch_i]);
 				}
 
 				n_playing++;
@@ -759,22 +760,24 @@ chosen_sample_t *select_sample(const std::map<uint16_t, sample_set_t *> & sets, 
 	return out;
 }
 
-size_t find_sample_end(const chosen_sample_t *const cs, const size_t sel_end, const int ch_i)
+// doubt that this helps as there is that low-pass filter preventing ticks
+size_t find_sample_end(const chosen_sample_t *const cs, size_t offset, const size_t sel_end, const int ch_i)
 {
-	size_t temp_offset1 = sel_end;
-	size_t temp_offset2 = sel_end;
 	const sample_t *const s = cs -> s;
+	double len = 1.0;
 
-	while(s -> samples[ch_i][temp_offset1] && temp_offset1 > cs -> offset[ch_i])
-		temp_offset1--;
+	while(offset < sel_end) {
+		double cur_len = fabs(s -> samples[ch_i][offset]);
 
-	while(s -> samples[ch_i][temp_offset2] && temp_offset2 < s -> n_samples[ch_i])
-		temp_offset2++;
+		if (cur_len > len)
+			break;
 
-	if (temp_offset2 - sel_end < sel_end - temp_offset1)
-		return temp_offset2;
+		offset++;
+		
+		len = cur_len;
+	}
 
-	return temp_offset1;
+	return offset;
 }
 
 ssize_t find_playing_note(const std::vector<chosen_sample_t *> & ps, const uint8_t ch, const uint8_t midi_note)
@@ -1047,9 +1050,9 @@ int main(int argc, char *argv[])
 				if (pi != -1) {
 					chosen_sample_t *cs = playing_notes.at(pi);
 
-					cs -> end_offset[0] = find_sample_end(cs, cs -> s -> n_samples[0], 0);
+					cs -> end_offset[0] = find_sample_end(cs, cs->offset[0], cs -> s -> n_samples[0], 0);
 					if (cs -> s -> stereo)
-						cs -> end_offset[1] = find_sample_end(cs, cs -> s -> n_samples[1], 1);
+						cs -> end_offset[1] = find_sample_end(cs, cs->offset[1], cs -> s -> n_samples[1], 1);
 				}
 
 				adev -> lock.unlock();
@@ -1094,13 +1097,17 @@ int main(int argc, char *argv[])
 					printf("END OF NOTE\n");
 
 				// never repeat percussion (ch == 9)
-				if (ch == 9 || isEnd) {
-					size_t sel_end0 = cs -> offset[0] + (cs -> s -> n_samples[0] - cs -> offset[0]) * velocity / 127.0;
-					size_t sel_end1 = cs -> offset[1] + (cs -> s -> n_samples[1] - cs -> offset[1]) * velocity / 127.0;
+				if (ch == 9) {
+					cs -> end_offset[0] = cs -> s -> n_samples[0];
+					cs -> end_offset[1] = cs -> s -> n_samples[1];
+				}
+				else if (isEnd) {
+					const size_t sel_end0 = cs -> s -> n_samples[0];
+					const size_t sel_end1 = cs -> s -> n_samples[1];
 
-					cs -> end_offset[0] = find_sample_end(cs, sel_end0, 0);
+					cs -> end_offset[0] = find_sample_end(cs, cs->offset[0], sel_end0, 0);
 					if (cs -> s -> stereo)
-						cs -> end_offset[1] = find_sample_end(cs, sel_end1, 1);
+						cs -> end_offset[1] = find_sample_end(cs, cs->offset[1], sel_end1, 1);
 					else
 						cs -> end_offset[1] = -1;
 
