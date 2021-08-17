@@ -1,3 +1,5 @@
+#pragma once
+
 // based on http://stackoverflow.com/questions/8079526/lowpass-and-high-pass-filter-in-c-sharp
 class FilterButterworth
 {

@@ -33,76 +33,16 @@
 #include "sf2.h"
 #include "utils.h"
 #include "filter.h"
+#include "main.h"
+#include "terminal.h"
 
 #define SAMPLE_RATE 48000
-
-typedef struct
-{
-	uint8_t ch, midi_note, velocity;
-	double f;
-	double speed; // 1.0 = original speed, < is slower
-	double offset[2]; // double(!)
-	bool playing[2];
-	ssize_t end_offset[2], start_end_offset[2]; // -1 if not set
-	sample_t *s;
-} chosen_sample_t;
-
-typedef enum { CM_AS_IS, CM_CLIP, CM_ATAN, CM_TANH, CM_DIV } clip_method_t;
-
-typedef struct
-{
-	std::string dev_name;
-	unsigned int sample_rate, n_channels, bits;
-
-	FilterButterworth **filters;
-
-	clip_method_t cm;
-
-	std::mutex lock;
-	std::vector<chosen_sample_t *> *playing_notes;
-	double pitch_bends[16];
-
-	std::thread *th;
-        struct pw_main_loop *loop;
-        struct pw_stream *stream;
-	struct spa_pod_builder b;
-        const struct spa_pod *params[1];
-        uint8_t buffer[1024];
-	struct spa_audio_info_raw saiw;
-	struct pw_stream_events stream_events;
-} audio_dev_t;
 
 constexpr double PI = 4.0 * atan(1.0);
 
 SNDFILE *file_out = nullptr;
 
 volatile bool terminal_changed = false;
-
-WINDOW *win = nullptr;
-int max_x = 80, max_y = 24;
-void determine_terminal_size()
-{
-	struct winsize size;
-
-	max_x = 80;
-	max_y = 25;
-
-	if (ioctl(1, TIOCGWINSZ, &size) == 0)
-	{
-		max_y = size.ws_row;
-		max_x = size.ws_col;
-	}
-	else
-	{
-		char *dummy = getenv("COLUMNS");
-		if (dummy)
-			max_x = atoi(dummy);
-
-		dummy = getenv("LINES");
-		if (dummy)
-			max_x = atoi(dummy);
-	}
-}
 
 void sw_sigh(int sh)
 {
@@ -115,50 +55,6 @@ void sw_sigh(int sh)
 		endwin();
 		exit(0);
 	}
-}
-
-void create_windows()
-{
-	win = newwin(max_y, max_x, 0, 0);
-}
-
-void check_resize_terminal()
-{
-	if (!terminal_changed)
-		return;
-
-	determine_terminal_size();
-
-	if (ERR == resizeterm(max_y, max_x)) error_exit(false, "An error occured while resizing terminal(-window)\n");
-
-	endwin();
-	refresh(); /* <- as specified by ncurses faq, was: doupdate(); */
-
-	create_windows();
-}
-
-void init_ncurses(void)
-{
-	signal(SIGWINCH, sw_sigh);
-	signal(SIGINT, sw_sigh);
-
-	initscr();
-	start_color();
-	keypad(stdscr, TRUE);
-	cbreak();
-	intrflush(stdscr, FALSE);
-	noecho();
-	nonl();
-	refresh();
-	nodelay(stdscr, TRUE);
-	meta(stdscr, TRUE);	/* enable 8-bit input */
-	idlok(stdscr, TRUE);	/* may give a little clunky screenredraw */
-	idcok(stdscr, TRUE);	/* may give a little clunky screenredraw */
-	leaveok(stdscr, FALSE);
-
-	determine_terminal_size();
-
-	create_windows();
 }
 
 #define LOAD_BUFFER_SIZE 4096 // in items
@@ -817,7 +713,7 @@ int main(int argc, char *argv[])
 	if (fullScreen)
 		init_ncurses();
 
-	int ch_ny[16] = { 0 }, instr[16], bank[16];
+	int instr[16], bank[16];
 
 	for(int i=0; i<16; i++) {
 		instr[i] = 45; // some random default instrument
@@ -918,45 +814,8 @@ int main(int argc, char *argv[])
 				adev -> lock.unlock();
 			}
 
-			if (fullScreen) {
-				werase(win);
-				int y = 0;
-				adev -> lock.lock();
-
-				int cur_ch_ny[16] = { 0 };
-				for(chosen_sample_t * cur : playing_notes)
-					cur_ch_ny[cur -> ch]++;
-
-				int ty = 0;
-				for(int i=0; i<16; i++) {
-					ch_ny[i] = std::max(ch_ny[i], cur_ch_ny[i]);
-					ty += ch_ny[i];
-				}
-
-				if (ty > max_y) {
-					for(int i=0; i<16; i++)
-						ch_ny[i] = cur_ch_ny[i];
-				}
-
-				int wy[16] = { 0 };
-				for(int i=1; i<16; i++)
-					wy[i] = wy[i - 1] + ch_ny[i - 1];
-
-				for(chosen_sample_t * cur : playing_notes) {
-					mvwprintw(win, wy[cur -> ch], 0, "ch: %2d, note: %3d, velocity: %3d, end: %1d, freq: %6.1f, speed: %2.3f, file: %s", cur -> ch, cur -> midi_note, cur -> velocity, cur -> end_offset[0] != -1, cur -> f, cur -> speed, cur -> s -> filename.c_str());
-					wy[cur -> ch]++;
-
-					if (y >= max_y)
-						break;
-				}
-
-				mvwprintw(win, 0, max_x - 3, "%2zu", playing_notes.size());
-
-				adev -> lock.unlock();
-
-				wrefresh(win);
-				doupdate();
-			}
+			if (fullScreen)
+				update_terminal(adev, &playing_notes);
 		}
                 else if (ev->type == SND_SEQ_EVENT_PITCHBEND) { // pitch bend
 			uint8_t ch = ev->data.control.channel;

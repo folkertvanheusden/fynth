@@ -8,8 +8,11 @@
 
 extern volatile bool terminal_changed;
 
+int ch_ny[16] = { 0 };
+
 WINDOW *win = nullptr;
 int max_x = 80, max_y = 24;
+
 void determine_terminal_size()
 {
 	struct winsize size;
@@ -76,4 +79,45 @@ void init_ncurses(void)
 	determine_terminal_size();
 
 	create_windows();
+}
+
+void update_terminal(audio_dev_t *const adev, std::vector<chosen_sample_t *> *playing_notes)
+{
+	werase(win);
+	int y = 0;
+	adev -> lock.lock();
+
+	int cur_ch_ny[16] = { 0 };
+	for(chosen_sample_t * cur : *playing_notes)
+		cur_ch_ny[cur -> ch]++;
+
+	int ty = 0;
+	for(int i=0; i<16; i++) {
+		ch_ny[i] = std::max(ch_ny[i], cur_ch_ny[i]);
+		ty += ch_ny[i];
+	}
+
+	if (ty > max_y) {
+		for(int i=0; i<16; i++)
+			ch_ny[i] = cur_ch_ny[i];
+	}
+
+	int wy[16] = { 0 };
+	for(int i=1; i<16; i++)
+		wy[i] = wy[i - 1] + ch_ny[i - 1];
+
+	for(chosen_sample_t * cur : *playing_notes) {
+		mvwprintw(win, wy[cur -> ch], 0, "ch: %2d, note: %3d, velocity: %3d, end: %1d, freq: %6.1f, speed: %2.3f, file: %s", cur -> ch, cur -> midi_note, cur -> velocity, cur -> end_offset[0] != -1, cur -> f, cur -> speed, cur -> s -> filename.c_str());
+		wy[cur -> ch]++;
+
+		if (y >= max_y)
+			break;
+	}
+
+	mvwprintw(win, 0, max_x - 3, "%2zu", playing_notes->size());
+
+	adev -> lock.unlock();
+
+	wrefresh(win);
+	doupdate();
 }
