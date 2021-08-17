@@ -478,6 +478,22 @@ void open_client(snd_seq_t **const handle, int *const port)
 	*port = snd_seq_create_simple_port(*handle, "in", SND_SEQ_PORT_CAP_WRITE | SND_SEQ_PORT_CAP_SUBS_WRITE, SND_SEQ_PORT_TYPE_MIDI_GENERIC);
 }
 
+void start_wav(const char *rec_file, audio_dev_t *const adev, SF_INFO *const si)
+{
+	si->samplerate = adev -> sample_rate;
+	si->channels = adev -> n_channels;
+	si->format = SF_FORMAT_WAV;
+
+	if (adev -> bits == 16)
+		si->format |= SF_FORMAT_PCM_16;
+	else if (adev -> bits == 24)
+		si->format |= SF_FORMAT_PCM_24;
+	else if (adev -> bits == 32)
+		si->format |= SF_FORMAT_PCM_32;
+
+	file_out = sf_open(rec_file, SFM_WRITE, si);
+}
+
 void help()
 {
 	printf("applies to sound font file selected after this:\n");
@@ -556,10 +572,6 @@ int main(int argc, char *argv[])
 	if (sets.empty())
 		error_exit(false, "No sound font selected");
 
-	//for(sample_set_t *s : sets)
-	//printf("%s %d\n", s -> name.c_str(), s -> isPercussion);
-	//return 0;
-
 	snd_seq_t *ahandle = nullptr;
 	int aport = -1;
 	open_client(&ahandle, &aport);
@@ -570,35 +582,17 @@ int main(int argc, char *argv[])
 
 	dolog("Audio thread started\n");
 
-	if (rec_file) {
-		si.samplerate = adev -> sample_rate;
-		si.channels = adev -> n_channels;
-		si.format = SF_FORMAT_WAV;
-		if (adev -> bits == 16)
-			si.format |= SF_FORMAT_PCM_16;
-		else if (adev -> bits == 24)
-			si.format |= SF_FORMAT_PCM_24;
-		else if (adev -> bits == 32)
-			si.format |= SF_FORMAT_PCM_32;
+	if (rec_file)
+		start_wav(rec_file, adev, &si);
 
-		file_out = sf_open(rec_file, SFM_WRITE, &si);
-	}
-
-	channel_t channel_modes[16];
-	memset(&channel_modes, 0x00, sizeof channel_modes);
-
+	channel_t channel_modes[16] { 0 };
 	for(int i=0; i<16; i++)
 		channel_modes[i].poly = channel_modes[i].omni = true;
 
 	if (fullScreen)
 		init_ncurses();
 
-	int instr[16], bank[16];
-
-	for(int i=0; i<16; i++) {
-		instr[i] = 45; // some random default instrument
-		bank[i] = 0;
-	}
+	int instr[16] { 0 }, bank[16] { 0 };
 
 	for(;;) {
 		if (fullScreen)
