@@ -36,16 +36,50 @@
 
 #define SAMPLE_RATE 48000
 
+typedef struct
+{
+	uint8_t ch, midi_note, velocity;
+	double f;
+	double speed; // 1.0 = original speed, < is slower
+	double offset[2]; // double(!)
+	bool playing[2];
+	ssize_t end_offset[2], start_end_offset[2]; // -1 if not set
+	sample_t *s;
+} chosen_sample_t;
+
+typedef struct
+{
+	std::string dev_name;
+	unsigned int sample_rate, n_channels, bits;
+
+	FilterButterworth **filters;
+
+	clip_method_t cm;
+
+	std::mutex lock;
+	std::vector<chosen_sample_t *> *playing_notes;
+	double pitch_bends[16];
+
+	std::thread *th;
+        struct pw_main_loop *loop;
+        struct pw_stream *stream;
+	struct spa_pod_builder b;
+        const struct spa_pod *params[1];
+        uint8_t buffer[1024];
+	struct spa_audio_info_raw saiw;
+	struct pw_stream_events stream_events;
+} audio_dev_t;
+
 typedef enum { CM_AS_IS, CM_CLIP, CM_ATAN, CM_TANH, CM_DIV } clip_method_t;
 
 constexpr double PI = 4.0 * atan(1.0);
 
-SNDFILE *file_out = NULL;
+SNDFILE *file_out = nullptr;
 
 volatile bool terminal_changed = false;
 
-WINDOW *win = NULL;
-static int max_x = 80, max_y = 24;
+WINDOW *win = nullptr;
+int max_x = 80, max_y = 24;
 void determine_terminal_size()
 {
 	struct winsize size;
@@ -127,17 +161,6 @@ void init_ncurses(void)
 	create_windows();
 }
 
-typedef struct
-{
-	uint8_t ch, midi_note, velocity;
-	double f;
-	double speed; // 1.0 = original speed, < is slower
-	double offset[2]; // double(!)
-	bool playing[2];
-	ssize_t end_offset[2], start_end_offset[2]; // -1 if not set
-	sample_t *s;
-} chosen_sample_t;
-
 #define LOAD_BUFFER_SIZE 4096 // in items
 
 void load_sample_low(const std::string & filename, double **const samples_mono_left, double **const samples_right, size_t *const n_l, size_t *const n_r, unsigned int *const sample_rate, bool *const stereo)
@@ -155,7 +178,7 @@ void load_sample_low(const std::string & filename, double **const samples_mono_l
 
 	*sample_rate = si.samplerate;
 
-	*samples_mono_left = *samples_right = NULL;
+	*samples_mono_left = *samples_right = nullptr;
 	*n_l = 0;
 
 	for(;;)
@@ -210,7 +233,7 @@ sample_t *load_sample(const std::string & filename, const bool default_normalize
 	printf("%uHz samplerate, %u samples (%.1fs)\n", s -> sample_rate, min_n, double(min_n) / s -> sample_rate);
 
 	size_t n_m = 0;
-	double *mono = NULL;
+	double *mono = nullptr;
 	to_mono(s, &mono, &n_m);
 
 	// calc highest freq
@@ -239,29 +262,6 @@ double get_sample(const double *const in, const size_t n, const double off)
 
 	return (v1 + v2) / 2.0;
 }
-
-typedef struct
-{
-	std::string dev_name;
-	unsigned int sample_rate, n_channels, bits;
-
-	FilterButterworth **filters;
-
-	clip_method_t cm;
-
-	std::mutex lock;
-	std::vector<chosen_sample_t *> *playing_notes;
-	double pitch_bends[16];
-
-	std::thread *th;
-        struct pw_main_loop *loop;
-        struct pw_stream *stream;
-	struct spa_pod_builder b;
-        const struct spa_pod *params[1];
-        uint8_t buffer[1024];
-	struct spa_audio_info_raw saiw;
-	struct pw_stream_events stream_events;
-} audio_dev_t;
 
 void on_process(void *userdata)
 {
@@ -401,7 +401,7 @@ void on_process(void *userdata)
 	}
 
 again:
-	if ((dst = (int16_t *)buf->datas[0].data) == NULL)
+	if ((dst = (int16_t *)buf->datas[0].data) == nullptr)
 		goto fail;
 
 	memcpy(dst, out, period_size * ad -> n_channels * sizeof(int16_t));
@@ -492,7 +492,7 @@ chosen_sample_t *select_sample(const std::map<uint16_t, sample_set_t *> & sets, 
 
 	std::map<uint16_t, sample_set_t *>::const_iterator it = isPercussion ? sets.find((128 << 8) | midi_note) : sets.find((bank << 8) | instrument);
 
-	const sample_set_t *chosen_set = NULL;
+	const sample_set_t *chosen_set = nullptr;
 
 	if (it == sets.end()) {
 		dolog("instrument %d percussion %d fallback\n", instrument, isPercussion);
@@ -503,7 +503,7 @@ chosen_sample_t *select_sample(const std::map<uint16_t, sample_set_t *> & sets, 
 			if (cur -> isPercussion == isPercussion) {
 				if (cur -> sample_map[midi_note] != -1)
 					chosen_set = cur;
-				else if (cur -> filter.instruments.empty() && chosen_set == NULL)
+				else if (cur -> filter.instruments.empty() && chosen_set == nullptr)
 					chosen_set = cur;
 				else {
 					for(uint8_t cur_instr : cur -> filter.instruments) {
@@ -525,7 +525,7 @@ chosen_sample_t *select_sample(const std::map<uint16_t, sample_set_t *> & sets, 
 		chosen_set = it -> second;
 	}
 
-	chosen_sample_t *out = NULL;
+	chosen_sample_t *out = nullptr;
 
 	if (chosen_set) {
 		out = new chosen_sample_t;
@@ -539,7 +539,7 @@ chosen_sample_t *select_sample(const std::map<uint16_t, sample_set_t *> & sets, 
 		out -> playing[1] = false;
 		out -> end_offset[0] = out -> end_offset[1] = -1;
 		out -> start_end_offset[0] = out -> start_end_offset[1] = -1;
-		out -> s = NULL;
+		out -> s = nullptr;
 
 		ssize_t sel = -1;
 		const double f = midi_note_to_freq(midi_note);
@@ -683,7 +683,7 @@ sample_t *load_wav(const std::string & filename, const bool default_normalize)
 	printf("%uHz samplerate, %u samples (%.1fs)\n", s -> sample_rate, s -> n_samples[0], double(s -> n_samples[0]) / s -> sample_rate);
 
 	size_t n_m = 0;
-	double *mono = NULL;
+	double *mono = nullptr;
 	to_mono(s, &mono, &n_m);
 
 	// calc highest freq
@@ -873,7 +873,7 @@ int main(int argc, char *argv[])
 
 				bool isEnd = ev->type == SND_SEQ_EVENT_NOTEOFF;
 
-				chosen_sample_t *cs = NULL;
+				chosen_sample_t *cs = nullptr;
 				if (pi == -1) {
 					cs = select_sample(sets, ch, note, velocity, instr[ch], bank[ch], adev -> sample_rate);
 					if (!cs) {
