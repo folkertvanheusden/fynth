@@ -583,20 +583,25 @@ chosen_sample_t *select_sample(const std::map<uint16_t, sample_set_t *> & sets, 
 size_t find_sample_end(const chosen_sample_t *const cs, size_t offset, const size_t sel_end, const int ch_i)
 {
 	const sample_t *const s = cs -> s;
+	size_t start = offset;
+	size_t final_end = offset;
 	double len = 1.0;
 
 	while(offset < sel_end) {
 		double cur_len = fabs(s -> samples[ch_i][offset]);
 
-		if (cur_len > len)
-			break;
+		if (cur_len < len) {
+			len = cur_len;
+			final_end = offset;
+
+			if (len == 0)
+				break;
+		}
 
 		offset++;
-		
-		len = cur_len;
 	}
 
-	return offset;
+	return final_end;
 }
 
 ssize_t find_playing_note(const std::vector<chosen_sample_t *> & ps, const uint8_t ch, const uint8_t midi_note)
@@ -884,9 +889,6 @@ int main(int argc, char *argv[])
 					dolog("ch: %d, note: %d, velocity: %d, end: %zd\n", ch, cs -> midi_note, cs -> velocity, isEnd);
 				}
 
-				if (isEnd)
-					printf("END OF NOTE\n");
-
 				// never repeat percussion (ch == 9)
 				if (ch == 9) {
 					cs -> end_offset[0] = cs -> s -> n_samples[0];
@@ -902,7 +904,7 @@ int main(int argc, char *argv[])
 					else
 						cs -> end_offset[1] = -1;
 
-					printf("%f %zd / %zu\n", cs->offset[0], cs->end_offset[0], cs->s->n_samples[0]);
+					// printf("%f %zd / %zu\n", cs->offset[0], cs->end_offset[0], cs->s->n_samples[0]);
 				}
 
 				adev -> lock.unlock();
