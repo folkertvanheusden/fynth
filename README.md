@@ -3,8 +3,6 @@ fynth is a MIDI synthesizer for pipewire
 
 
 # building
-make
-
 You need a some packages to be installed:
 
 * libfftw3-dev
@@ -12,6 +10,13 @@ You need a some packages to be installed:
 * libsndfile1-dev
 * libncurses5-dev
 * libpipewire-0.3-dev
+
+Then:
+
+* mkdir build
+* cd build
+* cmake ..
+* make
 
 
 # usage
