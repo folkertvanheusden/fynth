@@ -254,6 +254,16 @@ sample_t *load_sf2_sample(const std::string & sf2_filename, const std::map<std::
 	return s;
 }
 
+sample_set_t * alloc_sample_set()
+{
+	sample_set_t *ss = new sample_set_t;
+
+	for(size_t i=0; i<128; i++)
+		ss -> sample_map[i] = -1;
+
+	return ss;
+}
+
 sample_set_t * add_instrument_bank_to_sample_set(std::map<uint16_t, sample_set_t *> *const sets, const uint16_t instrument, const std::string & name, const bool isPercussion, sample_t *const s)
 {
 	std::map<uint16_t, sample_set_t *>::iterator ss_it = sets -> find(instrument);

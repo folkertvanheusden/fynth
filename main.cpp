@@ -47,6 +47,8 @@ typedef struct
 	sample_t *s;
 } chosen_sample_t;
 
+typedef enum { CM_AS_IS, CM_CLIP, CM_ATAN, CM_TANH, CM_DIV } clip_method_t;
+
 typedef struct
 {
 	std::string dev_name;
@@ -69,8 +71,6 @@ typedef struct
 	struct spa_audio_info_raw saiw;
 	struct pw_stream_events stream_events;
 } audio_dev_t;
-
-typedef enum { CM_AS_IS, CM_CLIP, CM_ATAN, CM_TANH, CM_DIV } clip_method_t;
 
 constexpr double PI = 4.0 * atan(1.0);
 
@@ -658,16 +658,6 @@ typedef struct
        bool poly, omni;
 } channel_t;
 
-sample_set_t * alloc_sample_set()
-{
-	sample_set_t *ss = new sample_set_t;
-
-	for(size_t i=0; i<128; i++)
-		ss -> sample_map[i] = -1;
-
-	return ss;
-}
-
 sample_t *load_wav(const std::string & filename, const bool default_normalize)
 {
 	sample_t *s = new sample_t;
@@ -893,6 +883,8 @@ int main(int argc, char *argv[])
 						cs -> offset[0] = cs -> offset[1] = 0.0;
 						cs -> playing[0] = true;
 						cs -> playing[1] = cs -> s -> stereo;
+						cs->start_end_offset[0] = -1;
+						cs->start_end_offset[1] = -1;
 					}
 
 					cs -> velocity = velocity;
