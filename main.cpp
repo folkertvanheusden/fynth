@@ -401,9 +401,6 @@ double get_sample(const double *const in, const size_t n, const double off)
 
 typedef struct
 {
-	pthread_t th;
-	std::atomic_bool terminate;
-
 	std::string dev_name;
 	unsigned int sample_rate, n_channels, bits;
 
@@ -415,8 +412,14 @@ typedef struct
 	std::vector<chosen_sample_t *> *playing_notes;
 	double pitch_bends[16];
 
+	std::thread *th;
         struct pw_main_loop *loop;
         struct pw_stream *stream;
+	struct spa_pod_builder b;
+        const struct spa_pod *params[1];
+        uint8_t buffer[1024];
+	struct spa_audio_info_raw saiw;
+	struct pw_stream_events stream_events;
 } audio_dev_t;
 
 void on_process(void *userdata)
@@ -577,7 +580,7 @@ bool isBigEndian()
 	return !!p[0];
 }
 
-audio_dev_t * start_pw_thread(std::vector<chosen_sample_t *> *const pn, const int sr, const clip_method_t cm, const int bits)
+audio_dev_t * configure_pw(std::vector<chosen_sample_t *> *const pn, const int sr, const clip_method_t cm, const int bits)
 {
 	int err;
 	audio_dev_t *const ad = new audio_dev_t;
@@ -585,8 +588,6 @@ audio_dev_t * start_pw_thread(std::vector<chosen_sample_t *> *const pn, const in
 	ad -> n_channels = 2;
 
 	ad -> cm = cm;
-
-	ad -> terminate = false;
 
 	ad -> sample_rate = sr;
 	ad -> bits = bits;
@@ -604,59 +605,44 @@ audio_dev_t * start_pw_thread(std::vector<chosen_sample_t *> *const pn, const in
 
 	ad -> playing_notes = pn;
 
-        const struct spa_pod *params[1];
-        uint8_t buffer[1024];
-        struct spa_pod_builder b = SPA_POD_BUILDER_INIT(buffer, sizeof(buffer));
- 
-        ad -> loop = pw_main_loop_new(NULL);
+	ad -> th = new std::thread([ad, sr]() {
+			ad -> b = SPA_POD_BUILDER_INIT(ad->buffer, sizeof(ad->buffer));
 
-	const struct pw_stream_events stream_events = {
-		PW_VERSION_STREAM_EVENTS,
-		.process = on_process,
-	};
+			ad -> loop = pw_main_loop_new(nullptr);
 
-        ad -> stream = pw_stream_new_simple(
-                        pw_main_loop_get_loop(ad -> loop),
-                        "fynth",
-                        pw_properties_new(
-                                PW_KEY_MEDIA_TYPE, "Audio",
-                                PW_KEY_MEDIA_CATEGORY, "Playback",
-                                PW_KEY_MEDIA_ROLE, "Music",
-                                nullptr),
-                        &stream_events,
-                        ad);
+			ad -> stream_events = { 0 };
+			ad -> stream_events.version = PW_VERSION_STREAM_EVENTS;
+			ad -> stream_events.process = on_process;
 
-	struct spa_audio_info_raw saiw;
-	saiw.format = SPA_AUDIO_FORMAT_S16;
-	saiw.channels = 2;
-	saiw.rate = sr;
- 
-        params[0] = spa_format_audio_raw_build(&b, SPA_PARAM_EnumFormat, &saiw);
- 
-        pw_stream_connect(ad -> stream,
-                          PW_DIRECTION_OUTPUT,
-                          PW_ID_ANY,
-                          pw_stream_flags(PW_STREAM_FLAG_AUTOCONNECT | PW_STREAM_FLAG_MAP_BUFFERS | PW_STREAM_FLAG_RT_PROCESS),
-                          params, 1);
+			ad -> stream = pw_stream_new_simple(
+					pw_main_loop_get_loop(ad -> loop),
+					"fynth",
+					pw_properties_new(
+						PW_KEY_MEDIA_TYPE, "Audio",
+						PW_KEY_MEDIA_CATEGORY, "Playback",
+						PW_KEY_MEDIA_ROLE, "Music",
+						nullptr),
+					&ad->stream_events,
+					ad);
+
+			ad->saiw.flags = 0;
+			ad->saiw.format = SPA_AUDIO_FORMAT_S16;
+			ad->saiw.channels = 2;
+			ad->saiw.rate = sr;
+			memset(ad->saiw.position, 0x00, sizeof ad->saiw.position);
+
+			ad->params[0] = spa_format_audio_raw_build(&ad->b, SPA_PARAM_EnumFormat, &ad->saiw);
+
+			pw_stream_connect(ad -> stream,
+					PW_DIRECTION_OUTPUT,
+					PW_ID_ANY,
+					pw_stream_flags(PW_STREAM_FLAG_AUTOCONNECT | PW_STREAM_FLAG_MAP_BUFFERS | PW_STREAM_FLAG_RT_PROCESS),
+					ad->params, 1);
+
+			pw_main_loop_run(ad -> loop);
+	});
 
 	return ad;
-}
-
-void close_audio_devices(std::vector<audio_dev_t *> *devices)
-{
-	for(size_t i=0; i<devices -> size(); i++)
-	{
-		audio_dev_t *const cur = devices -> at(i);
-
-		cur -> terminate = true;
-
-		void *dummy = NULL;
-		pthread_join(cur -> th, &dummy);
-
-		delete cur;
-	}
-
-	delete devices;
 }
 
 chosen_sample_t *select_sample(const std::map<uint16_t, sample_set_t *> & sets, const uint8_t ch, const uint8_t midi_note, const uint8_t velocity, const uint8_t instrument, const uint8_t bank, const int system_sample_rate)
@@ -925,11 +911,12 @@ void help()
 
 int main(int argc, char *argv[])
 {
-	printf("fynth v" VERSION ", (C) 2016-2021 by folkert@vanheusden.com\n\n");
+	printf("fynth v1.0, (C) 2016-2021 by folkert@vanheusden.com\n\n");
 
-	std::string rec_file;
+	const char *rec_file = nullptr;
 	int sr = SAMPLE_RATE, bits = 16;
 	bool isPercussion = false;
+	SF_INFO si = { 0 };
 
 	std::map<uint16_t, sample_set_t *> sets;
 
@@ -994,14 +981,11 @@ int main(int argc, char *argv[])
 
 	std::vector<chosen_sample_t *> playing_notes;
 
-	audio_dev_t *adev = start_pw_thread(&playing_notes, sr, CM_DIV, bits); // FIXME CM_... not hardcoded
-
-	std::thread t([adev]() { pw_main_loop_run(adev -> loop); });
+	audio_dev_t *adev = configure_pw(&playing_notes, sr, CM_DIV, bits); // FIXME CM_... not hardcoded
 
 	dolog("Audio thread started\n");
 
-	if (!rec_file.empty()) {
-		SF_INFO si = { 0 };
+	if (rec_file) {
 		si.samplerate = adev -> sample_rate;
 		si.channels = adev -> n_channels;
 		si.format = SF_FORMAT_WAV;
@@ -1011,7 +995,8 @@ int main(int argc, char *argv[])
 			si.format |= SF_FORMAT_PCM_24;
 		else if (adev -> bits == 32)
 			si.format |= SF_FORMAT_PCM_32;
-		file_out = sf_open(rec_file.c_str(), SFM_WRITE, &si);
+
+		file_out = sf_open(rec_file, SFM_WRITE, &si);
 	}
 
 	channel_t channel_modes[16];
