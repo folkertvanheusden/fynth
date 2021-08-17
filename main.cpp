@@ -32,6 +32,7 @@
 #include "types.h"
 #include "sf2.h"
 #include "utils.h"
+#include "filter.h"
 
 #define SAMPLE_RATE 48000
 
@@ -39,122 +40,7 @@ typedef enum { CM_AS_IS, CM_CLIP, CM_ATAN, CM_TANH, CM_DIV } clip_method_t;
 
 constexpr double PI = 4.0 * atan(1.0);
 
-bool fullScreen = true;
-
 SNDFILE *file_out = NULL;
-
-// based on http://stackoverflow.com/questions/8079526/lowpass-and-high-pass-filter-in-c-sharp
-class FilterButterworth
-{
-private:
-	/// <summary>
-	/// rez amount, from sqrt(2) to ~ 0.1
-	/// </summary>
-	double resonance;
-	double frequency;
-	int sampleRate;
-	bool isHighPass;
-
-	double c, a1, a2, a3, b1, b2;
-
-	/// <summary>
-	/// Array of input values, latest are in front
-	/// </summary>
-	double inputHistory[2];
-
-	/// <summary>
-	/// Array of output values, latest are in front
-	/// </summary>
-	double outputHistory[3];
-
-public:
-	FilterButterworth(const double frequency, const int sampleRate, const double isHighPass, const double resonance)
-	{
-		this -> resonance = resonance;
-		this -> frequency = frequency;
-		this -> sampleRate = sampleRate;
-		this -> isHighPass = isHighPass;
-
-		if (isHighPass) {
-			c = tan(M_PI * frequency / sampleRate);
-			a1 = 1.0 / (1.0 + resonance * c + c * c);
-			a2 = -2.0 * a1;
-			a3 = a1;
-			b1 = 2.0 * (c * c - 1.0) * a1;
-			b2 = (1.0 - resonance * c + c * c) * a1;
-		}
-		else {
-			c = 1.0 / tan(M_PI * frequency / sampleRate);
-			a1 = 1.0 / (1.0 + resonance * c + c * c);
-			a2 = 2.0 * a1;
-			a3 = a1;
-			b1 = 2.0 * (1.0 - c * c) * a1;
-			b2 = (1.0 - resonance * c + c * c) * a1;
-		}
-
-		memset(inputHistory, 0x00, sizeof inputHistory);
-		memset(outputHistory, 0x00, sizeof outputHistory);
-	}
-
-	double apply(const double newInput)
-	{
-		double newOutput = a1 * newInput + a2 * inputHistory[0] + a3 * inputHistory[1] - b1 * outputHistory[0] - b2 * outputHistory[1];
-
-		inputHistory[1] = inputHistory[0];
-		inputHistory[0] = newInput;
-
-		outputHistory[2] = outputHistory[1];
-		outputHistory[1] = outputHistory[0];
-		outputHistory[0] = newOutput;
-
-		return outputHistory[0];
-	}
-};
-
-uint64_t get_us()
-{
-        struct timeval tv { 0, 0 };
-        gettimeofday(&tv, nullptr);
-
-        return tv.tv_sec * 1000l * 1000l + tv.tv_usec;
-}
-
-std::string logfile = "/dev/null";
-void dolog(const char *fmt, ...)
-{
-	uint64_t now = get_us();
-
-	if (!logfile.empty())
-	{
-		char *buffer = NULL;
-
-		va_list ap;
-		va_start(ap, fmt);
-		vasprintf(&buffer, fmt, ap);
-		va_end(ap);
-
-		FILE *fh = fopen(logfile.c_str(), "a+");
-		if (!fh)
-			error_exit(true, "error accessing logfile %s", logfile.c_str());
-
-		time_t t = now / 1000000;
-		struct tm *tm = localtime(&t);
-
-		fprintf(fh, "%02d:%02d:%02d.%06u] %s",
-				tm->tm_hour, tm->tm_min, tm->tm_sec,
-				now % 1000000,
-			       	buffer);
-
-		fclose(fh);
-
-		if (!fullScreen) {
-			printf("%s", buffer);
-			fflush(NULL);
-		}
-
-		free(buffer);
-	}
-}
 
 volatile bool terminal_changed = false;
 
@@ -251,51 +137,6 @@ typedef struct
 	ssize_t end_offset[2], start_end_offset[2]; // -1 if not set
 	sample_t *s;
 } chosen_sample_t;
-
-std::string myformat(const char *const fmt, ...)
-{
-	char *buffer = NULL;
-        va_list ap;
-
-        va_start(ap, fmt);
-        (void)vasprintf(&buffer, fmt, ap);
-        va_end(ap);
-
-	std::string result = buffer;
-	free(buffer);
-
-	return result;
-}
-
-std::vector<std::string> * split(std::string in, std::string splitter)
-{
-	std::vector<std::string> *out = new std::vector<std::string>;
-	size_t splitter_size = splitter.size();
-
-	for(;;)
-	{
-		size_t pos = in.find(splitter);
-		if (pos == std::string::npos)
-			break;
-
-		std::string before = in.substr(0, pos);
-		out -> push_back(before);
-
-		size_t bytes_left = in.size() - (pos + splitter_size);
-		if (bytes_left == 0)
-		{
-			out -> push_back("");
-			return out;
-		}
-
-		in = in.substr(pos + splitter_size);
-	}
-
-	if (in.size() > 0)
-		out -> push_back(in);
-
-	return out;
-}
 
 #define LOAD_BUFFER_SIZE 4096 // in items
 
@@ -580,14 +421,6 @@ fail:
 	delete [] temp_buffer;
 }
 
-bool isBigEndian()
-{
-	const uint16_t v = 0xff00;
-	const uint8_t *p = (const uint8_t *)&v;
-
-	return !!p[0];
-}
-
 audio_dev_t * configure_pw(std::vector<chosen_sample_t *> *const pn, const int sr, const clip_method_t cm, const int bits)
 {
 	int err;
@@ -820,34 +653,6 @@ void all_notes_off(audio_dev_t *const adev, std::vector<chosen_sample_t *> *cons
 	adev -> lock.unlock();
 }
 
-bool ungetc_valid = false;
-uint8_t ungetc_byte = 0x00;
-
-void ungetc_midi(const uint8_t c)
-{
-//if (ungetc_valid) error
-	ungetc_byte = c;
-	ungetc_valid = true;
-}
-
-uint8_t read_midi_byte(snd_rawmidi_t *const midi_in)
-{
-	uint8_t buffer[1];
-
-	if (ungetc_valid) {
-		ungetc_valid = false;
-
-		return ungetc_byte;
-	}
-
-	if ((errno = snd_rawmidi_read(midi_in, buffer, 1)) < 0)
-		error_exit(true, "Failed receiving from MIDI device");
-
-	//dolog("[%02x] ", buffer[0]);
-
-	return buffer[0];
-}
-
 typedef struct
 {
        bool poly, omni;
@@ -930,6 +735,7 @@ int main(int argc, char *argv[])
 	int sr = SAMPLE_RATE, bits = 16;
 	bool isPercussion = false;
 	SF_INFO si = { 0 };
+	bool fullScreen = true;
 
 	std::map<uint16_t, sample_set_t *> sets;
 
@@ -961,7 +767,7 @@ int main(int argc, char *argv[])
 				break;
 
 			case 'l':
-				logfile = optarg;
+				setlog(optarg, fullScreen);
 				break;
 
 			case 'f':

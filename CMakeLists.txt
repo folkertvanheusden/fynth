@@ -9,6 +9,7 @@ add_executable(
   fynth
   error.cpp
   fft.cpp
+  filter.cpp
   main.cpp
   sf2.cpp
   utils.cpp
