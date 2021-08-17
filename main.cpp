@@ -513,7 +513,7 @@ int main(int argc, char *argv[])
 {
 	printf("fynth v1.0, (C) 2016-2021 by folkert@vanheusden.com\n\n");
 
-	const char *rec_file = nullptr;
+	const char *rec_file = nullptr, *lf = nullptr;
 	int sr = SAMPLE_RATE, bits = 16;
 	bool isPercussion = false;
 	SF_INFO si = { 0 };
@@ -549,7 +549,7 @@ int main(int argc, char *argv[])
 				break;
 
 			case 'l':
-				setlog(optarg, fullScreen);
+				lf = optarg;
 				break;
 
 			case 'f':
@@ -568,7 +568,10 @@ int main(int argc, char *argv[])
 	}
 
         pw_init(&argc, &argv);
- 
+
+	if (lf)
+		setlog(lf, fullScreen);
+
 	if (sets.empty())
 		error_exit(false, "No sound font selected");
 
@@ -608,6 +611,8 @@ int main(int argc, char *argv[])
 
 			// 0x80 with velocity != 0 means start stopping note eg end of note
 			if (velocity == 0) {
+				dolog("channel %d, note %d: OFF\n", ch, note);
+
 				adev -> lock.lock();
 
 				ssize_t pi = find_playing_note(playing_notes, ch, note);
@@ -728,7 +733,7 @@ int main(int argc, char *argv[])
 				}
 			}
 			else if (d1 == 0) { // bank change
-				printf("change bank %d to %d\n", ch, d2);
+				dolog("change bank %d to %d\n", ch, d2);
 				bank[ch] = d2;
 			}
 		}
@@ -736,7 +741,7 @@ int main(int argc, char *argv[])
 			uint8_t ch = ev->data.control.channel;
 			int value = ev->data.control.value;
 
-			printf("change instrument %d to %d\n", ch, value);
+			dolog("change instrument %d to %d\n", ch, value);
 
 			instr[ch] = value;
 		}
