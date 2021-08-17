@@ -490,7 +490,6 @@ void on_process(void *userdata)
 					cur->offset[ch_i] = fmod(cur->offset[ch_i], cur->s->n_samples[ch_i]);
 				}
 
-#if 0
 				if (cur->offset[ch_i] >= cur->start_end_offset[ch_i] && cur->start_end_offset[ch_i] >= 0) {
 					double steps = 1.0 / (cur->end_offset[ch_i] - cur->start_end_offset[ch_i]);
 
@@ -498,7 +497,6 @@ void on_process(void *userdata)
 
 					c[ch_i] *= mul;
 				}
-#endif
 
 				n_playing++;
 			}
