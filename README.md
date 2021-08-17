@@ -33,4 +33,4 @@ August 15, 2021 I added pipewire support in it.
 
 
 # license
-BSD-3
+Apache license v2.0
