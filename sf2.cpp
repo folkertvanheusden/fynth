@@ -12,7 +12,6 @@
 #include "types.h"
 #include "utils.h"
 #include "fft.h"
-#include "main.h"
 
 std::string get_string(const uint8_t *const p, const size_t len)
 {
