@@ -11,6 +11,7 @@ add_executable(
   fft.cpp
   filter.cpp
   main.cpp
+  sample.cpp
   sf2.cpp
   terminal.cpp
   utils.cpp
