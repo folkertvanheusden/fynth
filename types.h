@@ -1,5 +1,4 @@
-#ifndef _TYPES_H_
-#define _TYPES_H_
+#pragma once
 
 #include <string>
 #include <vector>
@@ -33,5 +32,3 @@ typedef struct
 
 	filter_t filter;
 } sample_set_t;
-
-#endif

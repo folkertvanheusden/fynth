@@ -21,7 +21,7 @@ typedef struct
 	double offset[2]; // double(!)
 	bool playing[2];
 	ssize_t end_offset[2], start_end_offset[2]; // -1 if not set
-	sample_t *s;
+	const sample_t *s;
 } chosen_sample_t;
 
 typedef enum { CM_AS_IS, CM_CLIP, CM_ATAN, CM_TANH, CM_DIV } clip_method_t;
