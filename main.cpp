@@ -112,7 +112,8 @@ void on_process_poly_sine(void *userdata)
 
 				for(int ch_i=0; ch_i<ad -> n_channels; ch_i++) {
 					for(int snr=0; snr<n_snr; snr++) {
-						double v = sin(2 * M_PI * (cur->f + snr) * cur->offset[ch_i] / ad->sample_rate) * mul;
+						double freq = midi_note_to_freq(cur->midi_note + 12 * snr);
+						double v = sin(2 * M_PI * freq * cur->offset[ch_i] / ad->sample_rate) * mul;
 
 						c[ch_i] += v;
 					}
