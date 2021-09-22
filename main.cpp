@@ -110,7 +110,7 @@ void on_process_poly_sine(void *userdata)
 
 				for(int ch_i=0; ch_i<ad -> n_channels; ch_i++) {
 					for(int snr=0; snr<1; snr++) {
-						double v = sin(2 * M_PI / (cur->f + snr) * cur->offset[ch_i]) * mul;
+						double v = sin(2 * M_PI * (cur->f + snr) * cur->offset[ch_i] / ad->sample_rate) * mul;
 
 						c[ch_i] += v;
 					}
