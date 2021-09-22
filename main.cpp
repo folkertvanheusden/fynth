@@ -70,6 +70,160 @@ double get_sample(const double *const in, const size_t n, const double off)
 	return (v1 + v2) / 2.0;
 }
 
+void on_process_poly_sine(void *userdata)
+{
+	audio_dev_t *const ad = (audio_dev_t *)userdata;
+
+	int stride = 0, period_size = 0;
+	struct pw_buffer *b = nullptr;
+	struct spa_buffer *buf = nullptr;
+	int16_t *dst = nullptr;
+	double *temp_buffer = nullptr;
+	void *out = nullptr;
+
+	std::unique_lock<std::mutex> lck(ad->lock);
+
+	if ((b = pw_stream_dequeue_buffer(ad -> stream)) == nullptr) {
+		pw_log_warn("out of buffers: %m");
+		dolog("out of buffers: %s\n", strerror(errno));
+		goto fail;
+	}
+
+	buf = b->buffer;
+
+	stride = sizeof(int16_t) * ad -> n_channels;
+	period_size = std::min(buf->datas[0].maxsize / stride, ad -> sample_rate / 75);
+
+	temp_buffer = new double[ad -> n_channels * period_size];
+
+	try {
+		for(int i=0; i<period_size; i++) {
+			size_t o = i * ad -> n_channels;
+
+			memset(&temp_buffer[o], 0x00, sizeof(double) * ad -> n_channels);
+
+			for(size_t cs=0; cs<ad -> playing_notes -> size();) {
+				chosen_sample_t *cur = ad -> playing_notes -> at(cs);
+
+				double c[2] { 0, 0 };
+				const double mul = cur -> velocity / 127.0;
+
+				for(int ch_i=0; ch_i<ad -> n_channels; ch_i++) {
+					for(int snr=0; snr<1; snr++) {
+						double v = sin(2 * M_PI / (cur->f + snr) * cur->offset[ch_i]) * mul;
+
+						c[ch_i] += v;
+					}
+				}
+
+				int n_playing = 0, n_sample_channels = ad -> n_channels;
+				for(int ch_i=0; ch_i<n_sample_channels; ch_i++) {
+					if (!cur->playing[ch_i])
+						continue;
+
+					// printf("%d] %f %zd\n", ch_i, cur->offset[ch_i], cur->end_offset[ch_i]);
+
+					if (cur->offset[ch_i] >= cur->end_offset[ch_i] && cur->end_offset[ch_i] >= 0) {
+						printf("note ended\n");
+						cur->playing[ch_i] = false;
+					}
+					else {
+						cur->offset[ch_i] += cur->speed * ad->pitch_bends[cur->ch];
+
+						cur->offset[ch_i] = fmod(cur->offset[ch_i], 360.0);
+
+						n_playing++;
+					}
+				}
+
+				if (n_playing == 0) {
+					ad -> playing_notes -> erase(ad -> playing_notes -> begin() + cs);
+				}
+				else {
+					cs++;
+					// FIXME this needs to be adjusted for <> 2 channels
+					temp_buffer[o + 0] += c[0];
+					temp_buffer[o + 1] += c[1];
+				}
+			}
+
+			for(int ch=0; ch < ad -> n_channels; ch++) {
+				if (ad -> cm == CM_CLIP) {
+					if (temp_buffer[o + ch] < -1)
+						temp_buffer[o + ch] = -1;
+					else if (temp_buffer[o + ch] > 1)
+						temp_buffer[o + ch] = 1;
+				}
+				else if (ad -> cm == CM_ATAN) {
+					temp_buffer[o + ch] = atan(temp_buffer[o + ch]) / PI;
+				}
+				else if (ad -> cm == CM_TANH) {
+					temp_buffer[o + ch] = tanh(temp_buffer[o + ch]);
+				}
+				else if (ad -> cm == CM_DIV) {
+					temp_buffer[o + ch] /= 4;
+				}
+				else {
+					// CM_AS_IS
+				}
+
+				temp_buffer[o + ch] = ad -> filters[ch] -> apply(temp_buffer[o + ch]);
+			}
+
+//			printf("%zu %f\n", o, temp_buffer[o]);
+		}
+	}
+	catch(...) {
+		printf(" *** EXCEPTION ***\n");
+	}
+
+	lck.unlock();
+
+	if (ad -> bits == 16) {
+		short *const io_buffer = new short[ad -> n_channels * period_size];
+		out = io_buffer;
+
+		for(int i=0; i<ad -> n_channels * period_size; i++)
+			io_buffer[i] = temp_buffer[i] * 32767.0;
+
+		if (file_out)
+			sf_writef_short(file_out, io_buffer, period_size);
+	}
+	else {
+		int32_t *const io_buffer = new int32_t[ad -> n_channels * period_size];
+		out = io_buffer;
+
+		double mul = 1677215.0;
+		if (ad -> bits == 32)
+			mul = 2147483647.0;
+
+		for(int i=0; i<ad -> n_channels * period_size; i++)
+			io_buffer[i] = temp_buffer[i] * mul;
+	}
+
+again:
+	if ((dst = (int16_t *)buf->datas[0].data) == nullptr) {
+		printf("fail\n");
+		goto fail;
+	}
+
+	memcpy(dst, out, period_size * ad -> n_channels * sizeof(int16_t));
+
+	buf->datas[0].chunk->offset = 0;
+	buf->datas[0].chunk->stride = stride;
+	buf->datas[0].chunk->size = period_size * stride;
+
+	pw_stream_queue_buffer(ad->stream, b);
+
+fail:
+	if (ad -> bits == 16)
+		delete [] (short *)out;
+	else
+		delete [] (int32_t *)out;
+
+	delete [] temp_buffer;
+}
+
 void on_process(void *userdata)
 {
 	audio_dev_t *const ad = (audio_dev_t *)userdata;
@@ -228,7 +382,7 @@ fail:
 	delete [] temp_buffer;
 }
 
-audio_dev_t * configure_pw(std::vector<chosen_sample_t *> *const pn, const int sr, const clip_method_t cm, const int bits)
+audio_dev_t * configure_pw(std::vector<chosen_sample_t *> *const pn, const int sr, const clip_method_t cm, const int bits, const bool poly_sine)
 {
 	int err;
 	audio_dev_t *const ad = new audio_dev_t;
@@ -253,14 +407,14 @@ audio_dev_t * configure_pw(std::vector<chosen_sample_t *> *const pn, const int s
 
 	ad -> playing_notes = pn;
 
-	ad -> th = new std::thread([ad, sr]() {
+	ad -> th = new std::thread([ad, sr, poly_sine]() {
 			ad -> b = SPA_POD_BUILDER_INIT(ad->buffer, sizeof(ad->buffer));
 
 			ad -> loop = pw_main_loop_new(nullptr);
 
 			ad -> stream_events = { 0 };
 			ad -> stream_events.version = PW_VERSION_STREAM_EVENTS;
-			ad -> stream_events.process = on_process;
+			ad -> stream_events.process = poly_sine ? on_process_poly_sine : on_process;
 
 			ad -> stream = pw_stream_new_simple(
 					pw_main_loop_get_loop(ad -> loop),
@@ -293,9 +447,29 @@ audio_dev_t * configure_pw(std::vector<chosen_sample_t *> *const pn, const int s
 	return ad;
 }
 
-chosen_sample_t *select_sample(const std::map<uint16_t, sample_set_t *> & sets, const uint8_t ch, const uint8_t midi_note, const uint8_t velocity, const uint8_t instrument, const uint8_t bank, const int system_sample_rate)
+chosen_sample_t *select_sample(const std::map<uint16_t, sample_set_t *> & sets, const uint8_t ch, const uint8_t midi_note, const uint8_t velocity, const uint8_t instrument, const uint8_t bank, const int system_sample_rate, const bool poly_sine)
 {
 	const bool isPercussion = ch == 9;
+
+	chosen_sample_t *out = nullptr;
+
+	if (poly_sine) {
+		out = new chosen_sample_t;
+		out -> ch = ch;
+		out -> midi_note = midi_note;
+		out -> velocity = velocity;
+		out -> speed = 1.0;
+		out -> offset[0] = out -> offset[1] = 0;
+		out -> playing[0] = true;
+		out -> playing[1] = true;
+		out -> end_offset[0] = out -> end_offset[1] = -1;
+		out -> start_end_offset[0] = out -> start_end_offset[1] = -1;
+		out -> s = nullptr;
+
+		out -> f = midi_note_to_freq(midi_note);
+
+		return out;
+	}
 
 	std::map<uint16_t, sample_set_t *>::const_iterator it = isPercussion ? sets.find((128 << 8) | midi_note) : sets.find((bank << 8) | instrument);
 
@@ -331,8 +505,6 @@ chosen_sample_t *select_sample(const std::map<uint16_t, sample_set_t *> & sets, 
 	else {
 		chosen_set = it -> second;
 	}
-
-	chosen_sample_t *out = nullptr;
 
 	if (chosen_set) {
 		out = new chosen_sample_t;
@@ -501,6 +673,7 @@ void help()
 	printf("\n");
 	printf("-f file.sf2     sound font file\n");
 	printf("-F file.wav     sound file\n");
+	printf("-p              use sine waves\n");
 	printf("\n");
 	printf("-r wav-file     record to \"wav-file\"\n");
 	printf("-R rate         sample rate (default: %d)\n", SAMPLE_RATE);
@@ -518,14 +691,19 @@ int main(int argc, char *argv[])
 	bool isPercussion = false;
 	SF_INFO si = { 0 };
 	bool fullScreen = true;
+	bool poly_sine = false;
 
 	std::map<uint16_t, sample_set_t *> sets;
 
 	int sw = -1;
-	while((sw = getopt(argc, argv, "F:PR:r:Nl:f:m:h")) != -1)
+	while((sw = getopt(argc, argv, "pF:PR:r:Nl:f:m:h")) != -1)
 	{
 		switch(sw)
 		{
+			case 'p':
+				poly_sine = true;
+				break;
+
 			case 'F': {
 					sample_t *s = load_wav(optarg, true/*FIXME*/);
 					add_instrument_bank_to_sample_set(&sets, (0 << 8) | 1/*FIXME*/, optarg, isPercussion, s);
@@ -572,7 +750,7 @@ int main(int argc, char *argv[])
 	if (lf)
 		setlog(lf, fullScreen);
 
-	if (sets.empty())
+	if (sets.empty() && poly_sine == false)
 		error_exit(false, "No sound font selected");
 
 	snd_seq_t *ahandle = nullptr;
@@ -581,7 +759,7 @@ int main(int argc, char *argv[])
 
 	std::vector<chosen_sample_t *> playing_notes;
 
-	audio_dev_t *adev = configure_pw(&playing_notes, sr, CM_DIV, bits); // FIXME CM_... not hardcoded
+	audio_dev_t *adev = configure_pw(&playing_notes, sr, CM_DIV, bits, poly_sine); // FIXME CM_... not hardcoded
 
 	dolog("Audio thread started\n");
 
@@ -619,9 +797,15 @@ int main(int argc, char *argv[])
 				if (pi != -1) {
 					chosen_sample_t *cs = playing_notes.at(pi);
 
-					cs -> end_offset[0] = find_sample_end(cs, cs->offset[0], cs -> s -> n_samples[0], 0);
-					if (cs -> s -> stereo)
-						cs -> end_offset[1] = find_sample_end(cs, cs->offset[1], cs -> s -> n_samples[1], 1);
+					if (poly_sine) {
+						cs -> end_offset[0] = cs->offset[0];
+						cs -> end_offset[1] = cs->offset[1];
+					}
+					else {
+						cs -> end_offset[0] = find_sample_end(cs, cs->offset[0], cs -> s -> n_samples[0], 0);
+						if (cs -> s -> stereo)
+							cs -> end_offset[1] = find_sample_end(cs, cs->offset[1], cs -> s -> n_samples[1], 1);
+					}
 
 					cs->start_end_offset[0] = cs->offset[0];
 					cs->start_end_offset[1] = cs->offset[1];
@@ -640,7 +824,7 @@ int main(int argc, char *argv[])
 
 				chosen_sample_t *cs = nullptr;
 				if (pi == -1) {
-					cs = select_sample(sets, ch, note, velocity, instr[ch], bank[ch], adev -> sample_rate);
+					cs = select_sample(sets, ch, note, velocity, instr[ch], bank[ch], adev -> sample_rate, poly_sine);
 					if (!cs) {
 						adev -> lock.unlock();
 						dolog("! Cannot select a sample, ch %d, note %d, velocity %d\n", ch, note, velocity);
@@ -649,7 +833,7 @@ int main(int argc, char *argv[])
 
 					playing_notes.push_back(cs);
 
-					dolog("ch: %d, note: %d, velocity: %d, freq: %f, speed: %f, file: %s", ch, cs -> midi_note, cs -> velocity, cs -> f, cs -> speed, cs -> s -> filename.c_str());
+					dolog("ch: %d, note: %d, velocity: %d, freq: %f, speed: %f, file: %s", ch, cs -> midi_note, cs -> velocity, cs -> f, cs -> speed, cs->s? cs -> s -> filename.c_str() : "sine wave");
 				}
 				else {
 					cs = playing_notes.at(pi);
@@ -657,7 +841,7 @@ int main(int argc, char *argv[])
 					if (!isEnd) {
 						cs -> offset[0] = cs -> offset[1] = 0.0;
 						cs -> playing[0] = true;
-						cs -> playing[1] = cs -> s -> stereo;
+						cs -> playing[1] = cs->s ?cs -> s -> stereo : false;
 						cs->start_end_offset[0] = -1;
 						cs->start_end_offset[1] = -1;
 					}
@@ -669,25 +853,37 @@ int main(int argc, char *argv[])
 
 				// never repeat percussion (ch == 9)
 				if (ch == 9) {
-					cs -> end_offset[0] = cs -> s -> n_samples[0];
-					cs -> end_offset[1] = cs -> s -> n_samples[1];
-					cs->start_end_offset[0] = cs -> s -> n_samples[0] - 1;
-					cs->start_end_offset[1] = cs -> s -> n_samples[1] - 1;
+					if (poly_sine) {
+						cs -> end_offset[0] = cs->offset[0];
+						cs -> end_offset[1] = cs->offset[1];
+					}
+					else if (cs -> s) {
+						cs -> end_offset[0] = cs -> s -> n_samples[0];
+						cs -> end_offset[1] = cs -> s -> n_samples[1];
+						cs->start_end_offset[0] = cs -> s -> n_samples[0] - 1;
+						cs->start_end_offset[1] = cs -> s -> n_samples[1] - 1;
+					}
 				}
 				else if (isEnd) {
-					const size_t sel_end0 = cs -> s -> n_samples[0];
-					const size_t sel_end1 = cs -> s -> n_samples[1];
+					if (poly_sine) {
+						cs -> end_offset[0] = cs->offset[0];
+						cs -> end_offset[1] = cs->offset[1];
+					}
+					else {
+						const size_t sel_end0 = cs -> s -> n_samples[0];
+						const size_t sel_end1 = cs -> s -> n_samples[1];
 
-					cs -> end_offset[0] = find_sample_end(cs, cs->offset[0], sel_end0, 0);
-					if (cs -> s -> stereo)
-						cs -> end_offset[1] = find_sample_end(cs, cs->offset[1], sel_end1, 1);
-					else
-						cs -> end_offset[1] = -1;
+						cs -> end_offset[0] = find_sample_end(cs, cs->offset[0], sel_end0, 0);
+						if (cs -> s && cs -> s -> stereo)
+							cs -> end_offset[1] = find_sample_end(cs, cs->offset[1], sel_end1, 1);
+						else
+							cs -> end_offset[1] = -1;
 
-					// printf("%f %zd / %zu\n", cs->offset[0], cs->end_offset[0], cs->s->n_samples[0]);
+						// printf("%f %zd / %zu\n", cs->offset[0], cs->end_offset[0], cs->s->n_samples[0]);
 
-					cs->start_end_offset[0] = cs->offset[0];
-					cs->start_end_offset[1] = cs->offset[1];
+						cs->start_end_offset[0] = cs->offset[0];
+						cs->start_end_offset[1] = cs->offset[1];
+					}
 				}
 
 				adev -> lock.unlock();
