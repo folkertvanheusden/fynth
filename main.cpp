@@ -130,8 +130,6 @@ void on_process_poly_sine(void *userdata)
 					else {
 						cur->offset[ch_i] += cur->speed * ad->pitch_bends[cur->ch];
 
-						cur->offset[ch_i] = fmod(cur->offset[ch_i], 360.0);
-
 						n_playing++;
 					}
 				}
