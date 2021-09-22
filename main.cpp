@@ -105,11 +105,13 @@ void on_process_poly_sine(void *userdata)
 			for(size_t cs=0; cs<ad -> playing_notes -> size();) {
 				chosen_sample_t *cur = ad -> playing_notes -> at(cs);
 
+				constexpr int n_snr = 8;
+
 				double c[2] { 0, 0 };
-				const double mul = cur -> velocity / 127.0;
+				const double mul = cur -> velocity / 127.0 / n_snr;
 
 				for(int ch_i=0; ch_i<ad -> n_channels; ch_i++) {
-					for(int snr=0; snr<1; snr++) {
+					for(int snr=0; snr<n_snr; snr++) {
 						double v = sin(2 * M_PI * (cur->f + snr) * cur->offset[ch_i] / ad->sample_rate) * mul;
 
 						c[ch_i] += v;
