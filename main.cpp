@@ -110,9 +110,11 @@ void on_process_poly_sine(void *userdata)
 				double c[2] { 0, 0 };
 				const double mul = cur -> velocity / 127.0 / n_snr;
 
+				const double base_mul = 2 * M_PI / ad->sample_rate;
+
 				for(int snr=0; snr<n_snr; snr++) {
-					double freq = midi_note_to_freq(cur->midi_note + snr * 12);
-					double v = sin(2 * M_PI * freq * cur->offset[0] / ad->sample_rate) * mul;
+					double freq = midi_note_to_freq(cur->midi_note + (snr - n_snr/2) * 12);
+					double v = sin(freq * cur->offset[0] * base_mul) * mul;
 
 					c[0] += v;
 				}
