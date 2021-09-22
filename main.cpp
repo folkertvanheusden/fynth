@@ -159,7 +159,7 @@ void on_process_poly_sine(void *userdata)
 					temp_buffer[o + ch] = tanh(temp_buffer[o + ch]);
 				}
 				else if (ad -> cm == CM_DIV) {
-					temp_buffer[o + ch] /= 4;
+					temp_buffer[o + ch] /= 8;
 				}
 				else {
 					// CM_AS_IS
