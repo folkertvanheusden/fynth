@@ -37,7 +37,10 @@
 #include "terminal.h"
 #include "sample.h"
 
-#define SAMPLE_RATE 48000
+#define SAMPLE_RATE 44100
+
+constexpr int n_snr = 4;
+constexpr bool square_wave = true;
 
 constexpr double PI = 4.0 * atan(1.0);
 
@@ -105,49 +108,50 @@ void on_process_poly_sine(void *userdata)
 			for(size_t cs=0; cs<ad -> playing_notes -> size();) {
 				chosen_sample_t *cur = ad -> playing_notes -> at(cs);
 
-				constexpr int n_snr = 8;
-
-				double c[2] { 0, 0 };
+				double c = 0;
 				const double mul = cur -> velocity / 127.0 / n_snr;
 
 				const double base_mul = 2 * M_PI / ad->sample_rate;
 
-				for(int snr=0; snr<n_snr; snr++) {
-					double freq = midi_note_to_freq(cur->midi_note + (snr - n_snr/2) * 12);
-					double v = sin(freq * cur->offset[0] * base_mul) * mul;
+				if (square_wave) {
+					for(int snr=0; snr<n_snr; snr++) {
+						double freq = midi_note_to_freq(cur->midi_note + (snr - n_snr/2) * 12);
+						double v = sin(freq * cur->offset[0] * base_mul);
 
-					c[0] += v;
-				}
-
-				for(int ch_i=1; ch_i<ad -> n_channels; ch_i++)
-					c[ch_i] = c[0];
-
-				int n_playing = 0, n_sample_channels = ad -> n_channels;
-				for(int ch_i=0; ch_i<n_sample_channels; ch_i++) {
-					if (!cur->playing[ch_i])
-						continue;
-
-					// printf("%d] %f %zd\n", ch_i, cur->offset[ch_i], cur->end_offset[ch_i]);
-
-					if (cur->offset[ch_i] >= cur->end_offset[ch_i] && cur->end_offset[ch_i] >= 0) {
-						printf("note ended\n");
-						cur->playing[ch_i] = false;
+						if (v < 0)
+							c -= mul;
+						else
+							c += mul;
 					}
-					else {
-						cur->offset[ch_i] += cur->speed * ad->pitch_bends[cur->ch];
+				}
+				else {
+					for(int snr=0; snr<n_snr; snr++) {
+						double freq = midi_note_to_freq(cur->midi_note + (snr - n_snr/2) * 12);
+						double v = sin(freq * cur->offset[0] * base_mul) * mul;
 
-						n_playing++;
+						c += v;
 					}
 				}
 
-				if (n_playing == 0) {
+				bool n_playing = false;
+
+				if (cur->offset[0] >= cur->end_offset[0] && cur->end_offset[0] >= 0) {
+					printf("note ended\n");
+					cur->playing[0] = false;
+				}
+				else {
+					cur->offset[0] += cur->speed * ad->pitch_bends[cur->ch];
+
+					n_playing = true;
+				}
+
+				if (n_playing == false) {
 					ad -> playing_notes -> erase(ad -> playing_notes -> begin() + cs);
 				}
 				else {
 					cs++;
-					// FIXME this needs to be adjusted for <> 2 channels
-					temp_buffer[o + 0] += c[0];
-					temp_buffer[o + 1] += c[1];
+					temp_buffer[o + 0] += c;
+					temp_buffer[o + 1] += c;
 				}
 			}
 
@@ -173,8 +177,6 @@ void on_process_poly_sine(void *userdata)
 
 				temp_buffer[o + ch] = ad -> filters[ch] -> apply(temp_buffer[o + ch]);
 			}
-
-//			printf("%zu %f\n", o, temp_buffer[o]);
 		}
 	}
 	catch(...) {
