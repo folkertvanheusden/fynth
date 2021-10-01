@@ -41,6 +41,7 @@
 
 constexpr int n_snr = 4;
 constexpr bool square_wave = true;
+constexpr int oct_mul = 9;  // 12
 
 constexpr double PI = 4.0 * atan(1.0);
 
@@ -72,6 +73,9 @@ double get_sample(const double *const in, const size_t n, const double off)
 
 	return (v1 + v2) / 2.0;
 }
+
+double *echo_buffer = new double[4096]();
+int eb_offset = 0;
 
 void on_process_poly_sine(void *userdata)
 {
@@ -115,7 +119,7 @@ void on_process_poly_sine(void *userdata)
 
 				if (square_wave) {
 					for(int snr=0; snr<n_snr; snr++) {
-						double freq = midi_note_to_freq(cur->midi_note + (snr - n_snr/2) * 12);
+						double freq = midi_note_to_freq(cur->midi_note + (snr - n_snr/2) * oct_mul);
 						double v = sin(freq * cur->offset[0] * base_mul);
 
 						if (v < 0)
@@ -126,7 +130,7 @@ void on_process_poly_sine(void *userdata)
 				}
 				else {
 					for(int snr=0; snr<n_snr; snr++) {
-						double freq = midi_note_to_freq(cur->midi_note + (snr - n_snr/2) * 12);
+						double freq = midi_note_to_freq(cur->midi_note + (snr - n_snr/2) * oct_mul);
 						double v = sin(freq * cur->offset[0] * base_mul) * mul;
 
 						c += v;
@@ -156,6 +160,14 @@ void on_process_poly_sine(void *userdata)
 			}
 
 			for(int ch=0; ch < ad -> n_channels; ch++) {
+				int e_o = eb_offset - 2048;
+				if (e_o < 0)
+					e_o += 4096;
+
+				temp_buffer[o + ch] += echo_buffer[e_o];
+			}
+
+			for(int ch=0; ch < ad -> n_channels; ch++) {
 				if (ad -> cm == CM_CLIP) {
 					if (temp_buffer[o + ch] < -1)
 						temp_buffer[o + ch] = -1;
@@ -169,7 +181,7 @@ void on_process_poly_sine(void *userdata)
 					temp_buffer[o + ch] = tanh(temp_buffer[o + ch]);
 				}
 				else if (ad -> cm == CM_DIV) {
-					temp_buffer[o + ch] /= 8;
+					temp_buffer[o + ch] /= n_snr;
 				}
 				else {
 					// CM_AS_IS
@@ -177,6 +189,10 @@ void on_process_poly_sine(void *userdata)
 
 				temp_buffer[o + ch] = ad -> filters[ch] -> apply(temp_buffer[o + ch]);
 			}
+
+			echo_buffer[eb_offset] = temp_buffer[o];
+			eb_offset++;
+			eb_offset &= 4095;
 		}
 	}
 	catch(...) {
