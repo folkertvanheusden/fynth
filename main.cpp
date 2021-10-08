@@ -37,10 +37,18 @@
 #include "terminal.h"
 #include "sample.h"
 
+std::atomic_bool stop_flag { false };
+
+void sigh(int s)
+{
+	stop_flag = true;
+}
+
 #define SAMPLE_RATE 44100
 
-constexpr int n_snr = 4;
-constexpr bool square_wave = true;
+constexpr int n_snr = N_SNR;
+constexpr bool square_wave = false, sw_duty_cycle = true;
+constexpr int duty_cycle = 50;
 constexpr int oct_mul = 9;  // 12
 
 constexpr double PI = 4.0 * atan(1.0);
@@ -117,7 +125,18 @@ void on_process_poly_sine(void *userdata)
 
 				const double base_mul = 2 * M_PI / ad->sample_rate;
 
-				if (square_wave) {
+				if (sw_duty_cycle) {
+					cur->accumulator += cur->f;
+
+					if (cur->accumulator >= ad -> sample_rate) {
+						cur->accumulator -= ad -> sample_rate;
+						c = +mul * n_snr;
+					}
+					else {
+						c = -mul * n_snr;
+					}
+				}
+				else if (square_wave) {
 					for(int snr=0; snr<n_snr; snr++) {
 						double freq = midi_note_to_freq(cur->midi_note + (snr - n_snr/2) * oct_mul);
 						double v = sin(freq * cur->offset[0] * base_mul);
@@ -487,6 +506,7 @@ chosen_sample_t *select_sample(const std::map<uint16_t, sample_set_t *> & sets, 
 		out -> end_offset[0] = out -> end_offset[1] = -1;
 		out -> start_end_offset[0] = out -> start_end_offset[1] = -1;
 		out -> s = nullptr;
+		out -> accumulator = 0;
 
 		out -> f = midi_note_to_freq(midi_note);
 
@@ -767,6 +787,8 @@ int main(int argc, char *argv[])
 		}
 	}
 
+	signal(SIGINT, sigh);
+
         pw_init(&argc, &argv);
 
 	if (lf)
@@ -797,7 +819,7 @@ int main(int argc, char *argv[])
 
 	int instr[16] { 0 }, bank[16] { 0 };
 
-	for(;;) {
+	for(;!stop_flag;) {
 		if (fullScreen)
 			check_resize_terminal();
 

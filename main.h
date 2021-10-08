@@ -10,6 +10,7 @@
 #include "filter.h"
 #include "types.h"
 
+#define N_SNR 4
 
 void sw_sigh(int sh);
 
@@ -22,6 +23,7 @@ typedef struct
 	bool playing[2];
 	ssize_t end_offset[2], start_end_offset[2]; // -1 if not set
 	const sample_t *s;
+	int accumulator;
 } chosen_sample_t;
 
 typedef enum { CM_AS_IS, CM_CLIP, CM_ATAN, CM_TANH, CM_DIV } clip_method_t;
