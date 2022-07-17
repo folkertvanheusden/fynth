@@ -37,6 +37,8 @@
 #include "terminal.h"
 #include "sample.h"
 
+extern bool fullScreen;
+
 std::atomic_bool stop_flag { false };
 
 void sigh(int s)
@@ -47,7 +49,7 @@ void sigh(int s)
 #define SAMPLE_RATE 44100
 
 constexpr int n_snr = N_SNR;
-constexpr bool square_wave = false, sw_duty_cycle = true;
+constexpr bool square_wave = false, sw_duty_cycle = false;
 constexpr int duty_cycle = 50;
 constexpr int oct_mul = 9;  // 12
 
@@ -726,13 +728,12 @@ void help()
 
 int main(int argc, char *argv[])
 {
-	printf("fynth v1.0, (C) 2016-2021 by folkert@vanheusden.com\n\n");
+	printf("fynth v1.0, (C) 2016-2022 by folkert@vanheusden.com\n\n");
 
 	const char *rec_file = nullptr, *lf = nullptr;
 	int sr = SAMPLE_RATE, bits = 16;
 	bool isPercussion = false;
 	SF_INFO si = { 0 };
-	bool fullScreen = true;
 	bool poly_sine = false;
 
 	std::map<uint16_t, sample_set_t *> sets;
