@@ -161,7 +161,7 @@ void on_process_poly_sine(void *userdata)
 				bool n_playing = false;
 
 				if (cur->offset[0] >= cur->end_offset[0] && cur->end_offset[0] >= 0) {
-					printf("note ended\n");
+					dolog("note ended\n");
 					cur->playing[0] = false;
 				}
 				else {
@@ -217,7 +217,7 @@ void on_process_poly_sine(void *userdata)
 		}
 	}
 	catch(...) {
-		printf(" *** EXCEPTION ***\n");
+		dolog(" *** EXCEPTION ***\n");
 	}
 
 	lck.unlock();
@@ -246,7 +246,7 @@ void on_process_poly_sine(void *userdata)
 
 again:
 	if ((dst = (int16_t *)buf->datas[0].data) == nullptr) {
-		printf("fail\n");
+		dolog("fail\n");
 		goto fail;
 	}
 
@@ -351,7 +351,7 @@ void on_process(void *userdata)
 			}
 			else {
 				cs++;
-				// FIXME this needs to be adjusted for <> 2 channels
+				// TODO this needs to be adjusted for <> 2 channels
 				temp_buffer[o + 0] += c[0];
 				temp_buffer[o + 1] += c[1];
 			}
@@ -440,12 +440,12 @@ audio_dev_t * configure_pw(std::vector<chosen_sample_t *> *const pn, const int s
 	for(int i=0; i<16; i++)
 		ad -> pitch_bends[i] = 1.0;
 
-	printf("sample rate: %u\n", ad -> sample_rate);
+	dolog("sample rate: %u\n", ad -> sample_rate);
 
 	ad -> filters = new FilterButterworth *[ad -> n_channels];
 	for(int i=0; i<ad -> n_channels; i++) {
 		// looks like the bigger the resonance, the bigger the reduction
-		ad -> filters[i] = new FilterButterworth(ad -> sample_rate / 2 - 250.0, ad -> sample_rate, false, sqrt(2.0) /* FIXME hardcoded values */);
+		ad -> filters[i] = new FilterButterworth(ad -> sample_rate / 2 - 250.0, ad -> sample_rate, false, sqrt(2.0) /* TODO hardcoded values */);
 	}
 
 	ad -> playing_notes = pn;
@@ -748,8 +748,8 @@ int main(int argc, char *argv[])
 				break;
 
 			case 'F': {
-					sample_t *s = load_wav(optarg, true/*FIXME*/);
-					add_instrument_bank_to_sample_set(&sets, (0 << 8) | 1/*FIXME*/, optarg, isPercussion, s);
+					sample_t *s = load_wav(optarg, true/*TODO*/);
+					add_instrument_bank_to_sample_set(&sets, (0 << 8) | 1/*TODO*/, optarg, isPercussion, s);
 				}
 				break;
 
@@ -790,7 +790,11 @@ int main(int argc, char *argv[])
 
 	signal(SIGINT, sigh);
 
+	pw_log_set_level(SPA_LOG_LEVEL_TRACE);
+
         pw_init(&argc, &argv);
+
+	printf("Compiled with libpipewire %s, linked with libpipewire %s\n", pw_get_headers_version(), pw_get_library_version());
 
 	if (lf)
 		setlog(lf, fullScreen);
@@ -804,7 +808,7 @@ int main(int argc, char *argv[])
 
 	std::vector<chosen_sample_t *> playing_notes;
 
-	audio_dev_t *adev = configure_pw(&playing_notes, sr, CM_DIV, bits, poly_sine); // FIXME CM_... not hardcoded
+	audio_dev_t *adev = configure_pw(&playing_notes, sr, CM_DIV, bits, poly_sine); // TODO CM_... not hardcoded
 
 	dolog("Audio thread started\n");
 
