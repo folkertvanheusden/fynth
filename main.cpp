@@ -100,7 +100,7 @@ void on_process_poly_sine(void *userdata)
 
 	std::unique_lock<std::mutex> lck(ad->lock);
 
-	if ((b = pw_stream_dequeue_buffer(ad -> stream)) == nullptr) {
+	if ((b = pw_stream_dequeue_buffer(ad->stream)) == nullptr) {
 		pw_log_warn("out of buffers: %m");
 		dolog("out of buffers: %s\n", strerror(errno));
 		goto fail;
@@ -108,30 +108,32 @@ void on_process_poly_sine(void *userdata)
 
 	buf = b->buffer;
 
-	stride = sizeof(int16_t) * ad -> n_channels;
-	period_size = std::min(buf->datas[0].maxsize / stride, ad -> sample_rate / 75);
+	stride = sizeof(int16_t) * ad->n_channels;
+	period_size = std::min(buf->datas[0].maxsize / stride, ad->sample_rate / 200);
 
-	temp_buffer = new double[ad -> n_channels * period_size];
+	temp_buffer = new double[ad->n_channels * period_size];
+
+//	printf("latency: %.2fms\n", period_size * 1000.0 / ad->sample_rate);
 
 	try {
 		for(int i=0; i<period_size; i++) {
-			size_t o = i * ad -> n_channels;
+			size_t o = i * ad->n_channels;
 
-			memset(&temp_buffer[o], 0x00, sizeof(double) * ad -> n_channels);
+			memset(&temp_buffer[o], 0x00, sizeof(double) * ad->n_channels);
 
-			for(size_t cs=0; cs<ad -> playing_notes -> size();) {
-				chosen_sample_t *cur = ad -> playing_notes -> at(cs);
+			for(size_t cs=0; cs<ad->playing_notes->size();) {
+				chosen_sample_t *cur = ad->playing_notes->at(cs);
 
 				double c = 0;
-				const double mul = cur -> velocity / 127.0 / n_snr;
+				const double mul = cur->velocity / 127.0 / n_snr;
 
 				const double base_mul = 2 * M_PI / ad->sample_rate;
 
 				if (sw_duty_cycle) {
 					cur->accumulator += cur->f;
 
-					if (cur->accumulator >= ad -> sample_rate) {
-						cur->accumulator -= ad -> sample_rate;
+					if (cur->accumulator >= ad->sample_rate) {
+						cur->accumulator -= ad->sample_rate;
 						c = +mul * n_snr;
 					}
 					else {
@@ -171,7 +173,7 @@ void on_process_poly_sine(void *userdata)
 				}
 
 				if (n_playing == false) {
-					ad -> playing_notes -> erase(ad -> playing_notes -> begin() + cs);
+					ad->playing_notes->erase(ad->playing_notes->begin() + cs);
 				}
 				else {
 					cs++;
@@ -180,7 +182,7 @@ void on_process_poly_sine(void *userdata)
 				}
 			}
 
-			for(int ch=0; ch < ad -> n_channels; ch++) {
+			for(int ch=0; ch < ad->n_channels; ch++) {
 				int e_o = eb_offset - 2048;
 				if (e_o < 0)
 					e_o += 4096;
@@ -188,27 +190,27 @@ void on_process_poly_sine(void *userdata)
 				temp_buffer[o + ch] += echo_buffer[e_o];
 			}
 
-			for(int ch=0; ch < ad -> n_channels; ch++) {
-				if (ad -> cm == CM_CLIP) {
+			for(int ch=0; ch < ad->n_channels; ch++) {
+				if (ad->cm == CM_CLIP) {
 					if (temp_buffer[o + ch] < -1)
 						temp_buffer[o + ch] = -1;
 					else if (temp_buffer[o + ch] > 1)
 						temp_buffer[o + ch] = 1;
 				}
-				else if (ad -> cm == CM_ATAN) {
+				else if (ad->cm == CM_ATAN) {
 					temp_buffer[o + ch] = atan(temp_buffer[o + ch]) / PI;
 				}
-				else if (ad -> cm == CM_TANH) {
+				else if (ad->cm == CM_TANH) {
 					temp_buffer[o + ch] = tanh(temp_buffer[o + ch]);
 				}
-				else if (ad -> cm == CM_DIV) {
+				else if (ad->cm == CM_DIV) {
 					temp_buffer[o + ch] /= n_snr;
 				}
 				else {
 					// CM_AS_IS
 				}
 
-				temp_buffer[o + ch] = ad -> filters[ch] -> apply(temp_buffer[o + ch]);
+				temp_buffer[o + ch] = ad->filters[ch]->apply(temp_buffer[o + ch]);
 			}
 
 			echo_buffer[eb_offset] = temp_buffer[o];
@@ -222,25 +224,25 @@ void on_process_poly_sine(void *userdata)
 
 	lck.unlock();
 
-	if (ad -> bits == 16) {
-		short *const io_buffer = new short[ad -> n_channels * period_size];
+	if (ad->bits == 16) {
+		short *const io_buffer = new short[ad->n_channels * period_size];
 		out = io_buffer;
 
-		for(int i=0; i<ad -> n_channels * period_size; i++)
+		for(int i=0; i<ad->n_channels * period_size; i++)
 			io_buffer[i] = temp_buffer[i] * 32767.0;
 
 		if (file_out)
 			sf_writef_short(file_out, io_buffer, period_size);
 	}
 	else {
-		int32_t *const io_buffer = new int32_t[ad -> n_channels * period_size];
+		int32_t *const io_buffer = new int32_t[ad->n_channels * period_size];
 		out = io_buffer;
 
 		double mul = 1677215.0;
-		if (ad -> bits == 32)
+		if (ad->bits == 32)
 			mul = 2147483647.0;
 
-		for(int i=0; i<ad -> n_channels * period_size; i++)
+		for(int i=0; i<ad->n_channels * period_size; i++)
 			io_buffer[i] = temp_buffer[i] * mul;
 	}
 
@@ -250,7 +252,7 @@ again:
 		goto fail;
 	}
 
-	memcpy(dst, out, period_size * ad -> n_channels * sizeof(int16_t));
+	memcpy(dst, out, period_size * ad->n_channels * sizeof(int16_t));
 
 	buf->datas[0].chunk->offset = 0;
 	buf->datas[0].chunk->stride = stride;
@@ -259,7 +261,7 @@ again:
 	pw_stream_queue_buffer(ad->stream, b);
 
 fail:
-	if (ad -> bits == 16)
+	if (ad->bits == 16)
 		delete [] (short *)out;
 	else
 		delete [] (int32_t *)out;
@@ -278,7 +280,7 @@ void on_process(void *userdata)
 	double *temp_buffer = nullptr;
 	void *out = nullptr;
 
-	if ((b = pw_stream_dequeue_buffer(ad -> stream)) == nullptr) {
+	if ((b = pw_stream_dequeue_buffer(ad->stream)) == nullptr) {
 		pw_log_warn("out of buffers: %m");
 		dolog("out of buffers: %s\n", strerror(errno));
 		goto fail;
@@ -286,30 +288,30 @@ void on_process(void *userdata)
 
 	buf = b->buffer;
 
-	stride = sizeof(int16_t) * ad -> n_channels;
-	period_size = std::min(buf->datas[0].maxsize / stride, ad -> sample_rate / 75);
+	stride = sizeof(int16_t) * ad->n_channels;
+	period_size = std::min(buf->datas[0].maxsize / stride, ad->sample_rate / 75);
 
-	temp_buffer = new double[ad -> n_channels * period_size];
+	temp_buffer = new double[ad->n_channels * period_size];
 
-	ad -> lock.lock();
+	ad->lock.lock();
 
 	for(int i=0; i<period_size; i++) {
-		size_t o = i * ad -> n_channels;
+		size_t o = i * ad->n_channels;
 
-		memset(&temp_buffer[o], 0x00, sizeof(double) * ad -> n_channels);
+		memset(&temp_buffer[o], 0x00, sizeof(double) * ad->n_channels);
 
-		for(size_t cs=0; cs<ad -> playing_notes -> size();) {
-			chosen_sample_t *cur = ad -> playing_notes -> at(cs);
+		for(size_t cs=0; cs<ad->playing_notes->size();) {
+			chosen_sample_t *cur = ad->playing_notes->at(cs);
 
 			double c[2] { 0, 0 };
-			if (cur -> s) {
-				const double mul = cur -> velocity / 127.0;
+			if (cur->s) {
+				const double mul = cur->velocity / 127.0;
 
-				if (cur -> playing[0])
-					c[0] = get_sample(cur -> s -> samples[0], cur -> s -> n_samples[0], cur -> offset[0]) * mul;
+				if (cur->playing[0])
+					c[0] = get_sample(cur->s->samples[0], cur->s->n_samples[0], cur->offset[0]) * mul;
 
-				if (cur -> playing[1] && cur -> s -> stereo)
-					c[1] = get_sample(cur -> s -> samples[1], cur -> s -> n_samples[1], cur -> offset[1]) * mul;
+				if (cur->playing[1] && cur->s->stereo)
+					c[1] = get_sample(cur->s->samples[1], cur->s->n_samples[1], cur->offset[1]) * mul;
 				else
 					c[1] = c[0];
 			}
@@ -347,7 +349,7 @@ void on_process(void *userdata)
 			}
 
 			if (n_playing == 0) {
-				ad -> playing_notes -> erase(ad -> playing_notes -> begin() + cs);
+				ad->playing_notes->erase(ad->playing_notes->begin() + cs);
 			}
 			else {
 				cs++;
@@ -357,50 +359,50 @@ void on_process(void *userdata)
 			}
 		}
 
-		for(int ch=0; ch < ad -> n_channels; ch++) {
-			if (ad -> cm == CM_CLIP) {
+		for(int ch=0; ch < ad->n_channels; ch++) {
+			if (ad->cm == CM_CLIP) {
 				if (temp_buffer[o + ch] < -1)
 					temp_buffer[o + ch] = -1;
 				else if (temp_buffer[o + ch] > 1)
 					temp_buffer[o + ch] = 1;
 			}
-			else if (ad -> cm == CM_ATAN) {
+			else if (ad->cm == CM_ATAN) {
 				temp_buffer[o + ch] = atan(temp_buffer[o + ch]) / PI;
 			}
-			else if (ad -> cm == CM_TANH) {
+			else if (ad->cm == CM_TANH) {
 				temp_buffer[o + ch] = tanh(temp_buffer[o + ch]);
 			}
-			else if (ad -> cm == CM_DIV) {
+			else if (ad->cm == CM_DIV) {
 				temp_buffer[o + ch] /= 4;
 			}
 			else {
 				// CM_AS_IS
 			}
 
-			temp_buffer[o + ch] = ad -> filters[ch] -> apply(temp_buffer[o + ch]);
+			temp_buffer[o + ch] = ad->filters[ch]->apply(temp_buffer[o + ch]);
 		}
 	}
 
-	ad -> lock.unlock();
+	ad->lock.unlock();
 
-	if (ad -> bits == 16) {
-		short *const io_buffer = new short[ad -> n_channels * period_size];
+	if (ad->bits == 16) {
+		short *const io_buffer = new short[ad->n_channels * period_size];
 		out = io_buffer;
 
-		for(int i=0; i<ad -> n_channels * period_size; i++)
+		for(int i=0; i<ad->n_channels * period_size; i++)
 			io_buffer[i] = temp_buffer[i] * 32767.0;
 
 		sf_writef_short(file_out, io_buffer, period_size);
 	}
 	else {
-		int32_t *const io_buffer = new int32_t[ad -> n_channels * period_size];
+		int32_t *const io_buffer = new int32_t[ad->n_channels * period_size];
 		out = io_buffer;
 
 		double mul = 1677215.0;
-		if (ad -> bits == 32)
+		if (ad->bits == 32)
 			mul = 2147483647.0;
 
-		for(int i=0; i<ad -> n_channels * period_size; i++)
+		for(int i=0; i<ad->n_channels * period_size; i++)
 			io_buffer[i] = temp_buffer[i] * mul;
 	}
 
@@ -408,7 +410,7 @@ again:
 	if ((dst = (int16_t *)buf->datas[0].data) == nullptr)
 		goto fail;
 
-	memcpy(dst, out, period_size * ad -> n_channels * sizeof(int16_t));
+	memcpy(dst, out, period_size * ad->n_channels * sizeof(int16_t));
 
 	buf->datas[0].chunk->offset = 0;
 	buf->datas[0].chunk->stride = stride;
@@ -417,7 +419,7 @@ again:
 	pw_stream_queue_buffer(ad->stream, b);
 
 fail:
-	if (ad -> bits == 16)
+	if (ad->bits == 16)
 		delete [] (short *)out;
 	else
 		delete [] (int32_t *)out;
@@ -430,37 +432,37 @@ audio_dev_t * configure_pw(std::vector<chosen_sample_t *> *const pn, const int s
 	int err;
 	audio_dev_t *const ad = new audio_dev_t;
 
-	ad -> n_channels = 2;
+	ad->n_channels = 2;
 
-	ad -> cm = cm;
+	ad->cm = cm;
 
-	ad -> sample_rate = sr;
-	ad -> bits = bits;
+	ad->sample_rate = sr;
+	ad->bits = bits;
 
 	for(int i=0; i<16; i++)
-		ad -> pitch_bends[i] = 1.0;
+		ad->pitch_bends[i] = 1.0;
 
-	dolog("sample rate: %u\n", ad -> sample_rate);
+	dolog("sample rate: %u\n", ad->sample_rate);
 
-	ad -> filters = new FilterButterworth *[ad -> n_channels];
-	for(int i=0; i<ad -> n_channels; i++) {
+	ad->filters = new FilterButterworth *[ad->n_channels];
+	for(int i=0; i<ad->n_channels; i++) {
 		// looks like the bigger the resonance, the bigger the reduction
-		ad -> filters[i] = new FilterButterworth(ad -> sample_rate / 2 - 250.0, ad -> sample_rate, false, sqrt(2.0) /* TODO hardcoded values */);
+		ad->filters[i] = new FilterButterworth(ad->sample_rate / 2 - 250.0, ad->sample_rate, false, sqrt(2.0) /* TODO hardcoded values */);
 	}
 
-	ad -> playing_notes = pn;
+	ad->playing_notes = pn;
 
-	ad -> th = new std::thread([ad, sr, poly_sine]() {
-			ad -> b = SPA_POD_BUILDER_INIT(ad->buffer, sizeof(ad->buffer));
+	ad->th = new std::thread([ad, sr, poly_sine]() {
+			ad->b = SPA_POD_BUILDER_INIT(ad->buffer, sizeof(ad->buffer));
 
-			ad -> loop = pw_main_loop_new(nullptr);
+			ad->loop = pw_main_loop_new(nullptr);
 
-			ad -> stream_events = { 0 };
-			ad -> stream_events.version = PW_VERSION_STREAM_EVENTS;
-			ad -> stream_events.process = poly_sine ? on_process_poly_sine : on_process;
+			ad->stream_events = { 0 };
+			ad->stream_events.version = PW_VERSION_STREAM_EVENTS;
+			ad->stream_events.process = poly_sine ? on_process_poly_sine : on_process;
 
-			ad -> stream = pw_stream_new_simple(
-					pw_main_loop_get_loop(ad -> loop),
+			ad->stream = pw_stream_new_simple(
+					pw_main_loop_get_loop(ad->loop),
 					"fynth",
 					pw_properties_new(
 						PW_KEY_MEDIA_TYPE, "Audio",
@@ -478,13 +480,13 @@ audio_dev_t * configure_pw(std::vector<chosen_sample_t *> *const pn, const int s
 
 			ad->params[0] = spa_format_audio_raw_build(&ad->b, SPA_PARAM_EnumFormat, &ad->saiw);
 
-			pw_stream_connect(ad -> stream,
+			pw_stream_connect(ad->stream,
 					PW_DIRECTION_OUTPUT,
 					PW_ID_ANY,
 					pw_stream_flags(PW_STREAM_FLAG_AUTOCONNECT | PW_STREAM_FLAG_MAP_BUFFERS | PW_STREAM_FLAG_RT_PROCESS),
 					ad->params, 1);
 
-			pw_main_loop_run(ad -> loop);
+			pw_main_loop_run(ad->loop);
 	});
 
 	return ad;
@@ -498,19 +500,19 @@ chosen_sample_t *select_sample(const std::map<uint16_t, sample_set_t *> & sets, 
 
 	if (poly_sine) {
 		out = new chosen_sample_t;
-		out -> ch = ch;
-		out -> midi_note = midi_note;
-		out -> velocity = velocity;
-		out -> speed = 1.0;
-		out -> offset[0] = out -> offset[1] = 0;
-		out -> playing[0] = true;
-		out -> playing[1] = true;
-		out -> end_offset[0] = out -> end_offset[1] = -1;
-		out -> start_end_offset[0] = out -> start_end_offset[1] = -1;
-		out -> s = nullptr;
-		out -> accumulator = 0;
+		out->ch = ch;
+		out->midi_note = midi_note;
+		out->velocity = velocity;
+		out->speed = 1.0;
+		out->offset[0] = out->offset[1] = 0;
+		out->playing[0] = true;
+		out->playing[1] = true;
+		out->end_offset[0] = out->end_offset[1] = -1;
+		out->start_end_offset[0] = out->start_end_offset[1] = -1;
+		out->s = nullptr;
+		out->accumulator = 0;
 
-		out -> f = midi_note_to_freq(midi_note);
+		out->f = midi_note_to_freq(midi_note);
 
 		return out;
 	}
@@ -523,15 +525,15 @@ chosen_sample_t *select_sample(const std::map<uint16_t, sample_set_t *> & sets, 
 		dolog("instrument %d percussion %d fallback\n", instrument, isPercussion);
 
 		for(it=sets.begin(); it != sets.end(); it++) {
-			const sample_set_t *cur = it -> second;
+			const sample_set_t *cur = it->second;
 
-			if (cur -> isPercussion == isPercussion) {
-				if (cur -> sample_map[midi_note] != -1)
+			if (cur->isPercussion == isPercussion) {
+				if (cur->sample_map[midi_note] != -1)
 					chosen_set = cur;
-				else if (cur -> filter.instruments.empty() && chosen_set == nullptr)
+				else if (cur->filter.instruments.empty() && chosen_set == nullptr)
 					chosen_set = cur;
 				else {
-					for(uint8_t cur_instr : cur -> filter.instruments) {
+					for(uint8_t cur_instr : cur->filter.instruments) {
 						if (cur_instr == instrument) {
 							chosen_set = cur;
 							break;
@@ -543,41 +545,41 @@ chosen_sample_t *select_sample(const std::map<uint16_t, sample_set_t *> & sets, 
 
 		if (!chosen_set) {
 			dolog("\tdid not find anything usable, default to first\n");
-			chosen_set = sets.begin() -> second;
+			chosen_set = sets.begin()->second;
 		}
 	}
 	else {
-		chosen_set = it -> second;
+		chosen_set = it->second;
 	}
 
 	if (chosen_set) {
 		out = new chosen_sample_t;
-		out -> ch = ch;
-		out -> midi_note = midi_note;
-		out -> velocity = velocity;
-		out -> f = 1.0;
-		out -> speed = 1.0;
-		out -> offset[0] = out -> offset[1] = 0;
-		out -> playing[0] = true;
-		out -> playing[1] = false;
-		out -> end_offset[0] = out -> end_offset[1] = -1;
-		out -> start_end_offset[0] = out -> start_end_offset[1] = -1;
-		out -> s = nullptr;
+		out->ch = ch;
+		out->midi_note = midi_note;
+		out->velocity = velocity;
+		out->f = 1.0;
+		out->speed = 1.0;
+		out->offset[0] = out->offset[1] = 0;
+		out->playing[0] = true;
+		out->playing[1] = false;
+		out->end_offset[0] = out->end_offset[1] = -1;
+		out->start_end_offset[0] = out->start_end_offset[1] = -1;
+		out->s = nullptr;
 
 		ssize_t sel = -1;
 		const double f = midi_note_to_freq(midi_note);
-		out -> f = f;
+		out->f = f;
 
-		const size_t n = chosen_set -> samples.size();
+		const size_t n = chosen_set->samples.size();
 
-		if (chosen_set -> sample_map[midi_note] != -1)
-			sel = chosen_set -> sample_map[midi_note];
+		if (chosen_set->sample_map[midi_note] != -1)
+			sel = chosen_set->sample_map[midi_note];
 		else if (isPercussion) {
 			for(int i=0; i<128; i++) {
 				int nr = (i + midi_note) & 0x7f;
 
-				if (chosen_set -> sample_map[nr] != -1) {
-					sel = chosen_set -> sample_map[nr];
+				if (chosen_set->sample_map[nr] != -1) {
+					sel = chosen_set->sample_map[nr];
 					break;
 				}
 			}
@@ -589,7 +591,7 @@ chosen_sample_t *select_sample(const std::map<uint16_t, sample_set_t *> & sets, 
 			double selDiff = std::numeric_limits<double>::max();
 
 			for(size_t i=0; i<n; i++) {
-				double curDiff = fabs(chosen_set -> samples.at(i) -> base_freq - f);
+				double curDiff = fabs(chosen_set->samples.at(i)->base_freq - f);
 
 				if (curDiff < selDiff) {
 					selDiff = curDiff;
@@ -599,12 +601,12 @@ chosen_sample_t *select_sample(const std::map<uint16_t, sample_set_t *> & sets, 
 		}
 
 		if (sel != -1) {
-			out -> s = chosen_set -> samples.at(sel);
+			out->s = chosen_set->samples.at(sel);
 
 			if (!isPercussion)
-				out -> speed = f / chosen_set -> samples.at(sel) -> base_freq * chosen_set -> samples.at(sel) -> sample_rate / double(system_sample_rate);
+				out->speed = f / chosen_set->samples.at(sel)->base_freq * chosen_set->samples.at(sel)->sample_rate / double(system_sample_rate);
 
-			out -> playing[1] = out -> s -> stereo;
+			out->playing[1] = out->s->stereo;
 		}
 	}
 
@@ -613,13 +615,13 @@ chosen_sample_t *select_sample(const std::map<uint16_t, sample_set_t *> & sets, 
 
 size_t find_sample_end(const chosen_sample_t *const cs, size_t offset, const size_t sel_end, const int ch_i)
 {
-	const sample_t *const s = cs -> s;
+	const sample_t *const s = cs->s;
 	size_t start = offset;
 	size_t final_end = offset;
 	double len = 1.0;
 
 	while(offset < sel_end) {
-		double cur_len = fabs(s -> samples[ch_i][offset]);
+		double cur_len = fabs(s->samples[ch_i][offset]);
 
 		if (cur_len < len) {
 			len = cur_len;
@@ -640,7 +642,7 @@ ssize_t find_playing_note(const std::vector<chosen_sample_t *> & ps, const uint8
 	const size_t n = ps.size();
 
 	for(size_t i=0; i<n; i++) {
-		if (ps.at(i) -> ch == ch && ps.at(i) -> midi_note == midi_note)
+		if (ps.at(i)->ch == ch && ps.at(i)->midi_note == midi_note)
 			return i;
 	}
 
@@ -649,31 +651,31 @@ ssize_t find_playing_note(const std::vector<chosen_sample_t *> & ps, const uint8
 
 void silence_channel(audio_dev_t *const adev, std::vector<chosen_sample_t *> *const s, const uint8_t ch)
 {
-	adev -> lock.lock();
+	adev->lock.lock();
 
-	for(size_t i=0; i<s -> size();) {
-		if (s -> at(i) -> ch == ch) {
-			delete s -> at(i);
-			s -> erase(s -> begin() + i);
+	for(size_t i=0; i<s->size();) {
+		if (s->at(i)->ch == ch) {
+			delete s->at(i);
+			s->erase(s->begin() + i);
 		}
 		else {
 			i++;
 		}
 	}
 
-	adev -> lock.unlock();
+	adev->lock.unlock();
 }
 
 void all_notes_off(audio_dev_t *const adev, std::vector<chosen_sample_t *> *const s)
 {
-	adev -> lock.lock();
+	adev->lock.lock();
 
-	for(size_t i=0; i<s -> size(); i++)
-		delete s -> at(i);
+	for(size_t i=0; i<s->size(); i++)
+		delete s->at(i);
 
-	s -> clear();
+	s->clear();
 
-	adev -> lock.unlock();
+	adev->lock.unlock();
 }
 
 typedef struct
@@ -696,15 +698,15 @@ void open_client(snd_seq_t **const handle, int *const port)
 
 void start_wav(const char *rec_file, audio_dev_t *const adev, SF_INFO *const si)
 {
-	si->samplerate = adev -> sample_rate;
-	si->channels = adev -> n_channels;
+	si->samplerate = adev->sample_rate;
+	si->channels = adev->n_channels;
 	si->format = SF_FORMAT_WAV;
 
-	if (adev -> bits == 16)
+	if (adev->bits == 16)
 		si->format |= SF_FORMAT_PCM_16;
-	else if (adev -> bits == 24)
+	else if (adev->bits == 24)
 		si->format |= SF_FORMAT_PCM_24;
-	else if (adev -> bits == 32)
+	else if (adev->bits == 32)
 		si->format |= SF_FORMAT_PCM_32;
 
 	file_out = sf_open(rec_file, SFM_WRITE, si);
@@ -840,93 +842,93 @@ int main(int argc, char *argv[])
 			if (velocity == 0) {
 				dolog("channel %d, note %d: OFF\n", ch, note);
 
-				adev -> lock.lock();
+				adev->lock.lock();
 
 				ssize_t pi = find_playing_note(playing_notes, ch, note);
 				if (pi != -1) {
 					chosen_sample_t *cs = playing_notes.at(pi);
 
 					if (poly_sine) {
-						cs -> end_offset[0] = cs->offset[0];
-						cs -> end_offset[1] = cs->offset[1];
+						cs->end_offset[0] = cs->offset[0];
+						cs->end_offset[1] = cs->offset[1];
 					}
 					else {
-						cs -> end_offset[0] = find_sample_end(cs, cs->offset[0], cs -> s -> n_samples[0], 0);
-						if (cs -> s -> stereo)
-							cs -> end_offset[1] = find_sample_end(cs, cs->offset[1], cs -> s -> n_samples[1], 1);
+						cs->end_offset[0] = find_sample_end(cs, cs->offset[0], cs->s->n_samples[0], 0);
+						if (cs->s->stereo)
+							cs->end_offset[1] = find_sample_end(cs, cs->offset[1], cs->s->n_samples[1], 1);
 					}
 
 					cs->start_end_offset[0] = cs->offset[0];
 					cs->start_end_offset[1] = cs->offset[1];
 				}
 
-				adev -> lock.unlock();
+				adev->lock.unlock();
 			}
 			else {
 				if (channel_modes[ch].poly == false)
 					silence_channel(adev, &playing_notes, ch);
 
-				adev -> lock.lock();
+				adev->lock.lock();
 				ssize_t pi = find_playing_note(playing_notes, ch, note);
 
 				bool isEnd = ev->type == SND_SEQ_EVENT_NOTEOFF;
 
 				chosen_sample_t *cs = nullptr;
 				if (pi == -1) {
-					cs = select_sample(sets, ch, note, velocity, instr[ch], bank[ch], adev -> sample_rate, poly_sine);
+					cs = select_sample(sets, ch, note, velocity, instr[ch], bank[ch], adev->sample_rate, poly_sine);
 					if (!cs) {
-						adev -> lock.unlock();
+						adev->lock.unlock();
 						dolog("! Cannot select a sample, ch %d, note %d, velocity %d\n", ch, note, velocity);
 						continue;
 					}
 
 					playing_notes.push_back(cs);
 
-					dolog("ch: %d, note: %d, velocity: %d, freq: %f, speed: %f, file: %s", ch, cs -> midi_note, cs -> velocity, cs -> f, cs -> speed, cs->s? cs -> s -> filename.c_str() : "sine wave");
+					dolog("ch: %d, note: %d, velocity: %d, freq: %f, speed: %f, file: %s", ch, cs->midi_note, cs->velocity, cs->f, cs->speed, cs->s? cs->s->filename.c_str() : "sine wave");
 				}
 				else {
 					cs = playing_notes.at(pi);
 
 					if (!isEnd) {
-						cs -> offset[0] = cs -> offset[1] = 0.0;
-						cs -> playing[0] = true;
-						cs -> playing[1] = cs->s ?cs -> s -> stereo : false;
+						cs->offset[0] = cs->offset[1] = 0.0;
+						cs->playing[0] = true;
+						cs->playing[1] = cs->s ?cs->s->stereo : false;
 						cs->start_end_offset[0] = -1;
 						cs->start_end_offset[1] = -1;
 					}
 
-					cs -> velocity = velocity;
+					cs->velocity = velocity;
 
-					dolog("ch: %d, note: %d, velocity: %d, end: %zd\n", ch, cs -> midi_note, cs -> velocity, isEnd);
+					dolog("ch: %d, note: %d, velocity: %d, end: %zd\n", ch, cs->midi_note, cs->velocity, isEnd);
 				}
 
 				// never repeat percussion (ch == 9)
 				if (ch == 9) {
 					if (poly_sine) {
-						cs -> end_offset[0] = cs->offset[0];
-						cs -> end_offset[1] = cs->offset[1];
+						cs->end_offset[0] = cs->offset[0];
+						cs->end_offset[1] = cs->offset[1];
 					}
-					else if (cs -> s) {
-						cs -> end_offset[0] = cs -> s -> n_samples[0];
-						cs -> end_offset[1] = cs -> s -> n_samples[1];
-						cs->start_end_offset[0] = cs -> s -> n_samples[0] - 1;
-						cs->start_end_offset[1] = cs -> s -> n_samples[1] - 1;
+					else if (cs->s) {
+						cs->end_offset[0] = cs->s->n_samples[0];
+						cs->end_offset[1] = cs->s->n_samples[1];
+						cs->start_end_offset[0] = cs->s->n_samples[0] - 1;
+						cs->start_end_offset[1] = cs->s->n_samples[1] - 1;
 					}
 				}
 				else if (isEnd) {
 					if (poly_sine) {
-						cs -> end_offset[0] = cs->offset[0];
-						cs -> end_offset[1] = cs->offset[1];
+						cs->end_offset[0] = cs->offset[0];
+						cs->end_offset[1] = cs->offset[1];
 					}
 					else {
-						const size_t sel_end0 = cs -> s -> n_samples[0];
-						const size_t sel_end1 = cs -> s -> n_samples[1];
+						const size_t sel_end0 = cs->s->n_samples[0];
+						const size_t sel_end1 = cs->s->n_samples[1];
 
-						cs -> end_offset[0] = find_sample_end(cs, cs->offset[0], sel_end0, 0);
-						if (cs -> s && cs -> s -> stereo)
-							cs -> end_offset[1] = find_sample_end(cs, cs->offset[1], sel_end1, 1);
+						cs->end_offset[0] = find_sample_end(cs, cs->offset[0], sel_end0, 0);
+						if (cs->s && cs->s->stereo)
+							cs->end_offset[1] = find_sample_end(cs, cs->offset[1], sel_end1, 1);
 						else
-							cs -> end_offset[1] = -1;
+							cs->end_offset[1] = -1;
 
 						// printf("%f %zd / %zu\n", cs->offset[0], cs->end_offset[0], cs->s->n_samples[0]);
 
@@ -935,7 +937,7 @@ int main(int argc, char *argv[])
 					}
 				}
 
-				adev -> lock.unlock();
+				adev->lock.unlock();
 			}
 
 			if (fullScreen)
@@ -948,9 +950,9 @@ int main(int argc, char *argv[])
 
 			dolog("PITCH BEND %f\n", pitch_bend);
 
-			adev -> lock.lock();
-			adev -> pitch_bends[ch] = pitch_bend;
-			adev -> lock.unlock();
+			adev->lock.lock();
+			adev->pitch_bends[ch] = pitch_bend;
+			adev->lock.unlock();
                 }
                 else if (ev->type == SND_SEQ_EVENT_CONTROLLER) { // change mode message / controller
 			uint8_t ch = ev->data.control.channel;
@@ -990,13 +992,10 @@ int main(int argc, char *argv[])
 
 			instr[ch] = value;
 		}
-		else {
-			dolog("UNK: %d\n", ev->type);
-		}
 	}
  
-        pw_stream_destroy(adev -> stream);
-        pw_main_loop_destroy(adev -> loop);
+        pw_stream_destroy(adev->stream);
+        pw_main_loop_destroy(adev->loop);
 
 	return 0;
 }
