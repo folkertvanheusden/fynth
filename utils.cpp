@@ -101,7 +101,7 @@ uint64_t get_us()
 }
 
 std::string logfile = "/dev/null";
-bool fullScreen = false;
+bool fullScreen = true;
 
 void setlog(const std::string & file, const bool fs)
 {
