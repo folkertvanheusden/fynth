@@ -107,7 +107,7 @@ void update_terminal(audio_dev_t *const adev, std::vector<chosen_sample_t *> *pl
 		wy[i] = wy[i - 1] + ch_ny[i - 1];
 
 	for(chosen_sample_t * cur : *playing_notes) {
-		mvwprintw(win, wy[cur -> ch], 0, "ch: %2d, note: %3d, velocity: %3d, end: %1d, freq: %6.1f, speed: %2.3f, file: %s", cur -> ch, cur -> midi_note, cur -> velocity, cur -> end_offset[0] != -1, cur -> f, cur -> speed, cur -> s -> filename.c_str());
+		mvwprintw(win, wy[cur -> ch], 0, "ch: %2d, note: %3d, velocity: %3d, end: %1d, freq: %6.1f, speed: %2.3f, file: %s", cur -> ch, cur -> midi_note, cur -> velocity, cur -> end_offset[0] != -1, cur -> f, cur -> speed, cur -> s ? cur->s->filename.c_str() : "sine");
 		wy[cur -> ch]++;
 
 		if (y >= max_y)
